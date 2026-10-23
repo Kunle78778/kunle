@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>车票最优助手 · 怎么买最划算、坐车最省时</title>
+<meta name="description" content="实时查询 12306 车次，计算最省钱、最省时的购票方案，支持中转组合与性价比排序。" />
+<link rel="stylesheet" href="assets/styles.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚄</text></svg>" />
+</head>
+<body>
+
+<header class="site-header">
+  <div class="wrap header-inner">
+    <div class="brand">
+      <span class="brand-icon">🚄</span>
+      <div>
+        <h1>车票最优助手</h1>
+        <p class="tagline">实时查 12306 · 算最划算的买法 · 找最快的走法</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <span id="sourceBadge" class="badge badge-muted">数据源：未连接</span>
+      <button id="settingsBtn" class="btn btn-ghost" type="button" title="设置代理地址">⚙ 设置</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- 查询表单 -->
+  <section class="card search-card">
+    <form id="searchForm" autocomplete="off">
+      <div class="route-row">
+        <div class="field city-field">
+          <label for="fromInput">出发城市</label>
+          <input id="fromInput" name="from" type="text" placeholder="如：北京 / bj / beijing" value="北京" required />
+          <ul class="suggest" id="fromSuggest" hidden></ul>
+        </div>
+
+        <button id="swapBtn" class="swap" type="button" title="交换出发与到达">⇄</button>
+
+        <div class="field city-field">
+          <label for="toInput">到达城市</label>
+          <input id="toInput" name="to" type="text" placeholder="如：上海 / sh" value="上海" required />
+          <ul class="suggest" id="toSuggest" hidden></ul>
+        </div>
+
+        <div class="field date-field">
+          <label for="dateInput">出发日期</label>
+          <input id="dateInput" name="date" type="date" required />
+        </div>
+      </div>
+
+      <div class="options-row">
+        <label class="switch">
+          <input id="transferInput" type="checkbox" checked />
+          <span>允许一次中转（跨站换乘）</span>
+        </label>
+
+        <div class="weight">
+          <span class="weight-label">省钱</span>
+          <input id="weightInput" type="range" min="0" max="100" value="55" step="5" />
+          <span class="weight-label">省时</span>
+          <output id="weightOut">55% 省钱</output>
+        </div>
+
+        <button class="btn btn-primary" type="submit" id="submitBtn">开始计算</button>
+      </div>
+    </form>
+  </section>
+
+  <!-- 状态提示 -->
+  <section id="status" class="status" hidden></section>
+
+  <!-- 推荐结果 -->
+  <section id="recommend" class="recommend" hidden>
+    <h2 class="section-title">推荐方案</h2>
+    <div class="recommend-grid" id="recommendGrid"></div>
+  </section>
+
+  <!-- 全部方案 -->
+  <section id="results" class="card results-card" hidden>
+    <div class="results-head">
+      <h2 class="section-title" id="resultsTitle">全部方案</h2>
+      <div class="tabs" id="sortTabs" role="tablist">
+        <button class="tab is-active" data-sort="score" type="button">综合最优</button>
+        <button class="tab" data-sort="price" type="button">最便宜</button>
+        <button class="tab" data-sort="time" type="button">最省时</button>
+        <button class="tab" data-sort="depart" type="button">最早出发</button>
+      </div>
+    </div>
+    <div class="filters">
+      <label class="switch switch-sm">
+        <input id="onlyBuyable" type="checkbox" />
+        <span>只看有票</span>
+      </label>
+      <label class="switch switch-sm">
+        <input id="onlyDirect" type="checkbox" />
+        <span>只看直达</span>
+      </label>
+      <span class="muted" id="countInfo"></span>
+    </div>
+    <div id="list" class="list"></div>
+  </section>
+
+  <p class="disclaimer">
+    数据来自中国铁路 12306 公开查询接口，仅供购票决策参考，最终以 12306 官方页面为准。
+    票价不含手续费，中转方案需自行分段购票。
+  </p>
+</main>
+
+<!-- 设置抽屉 -->
+<div id="settingsPanel" class="drawer" hidden>
+  <div class="drawer-inner card">
+    <h3>数据源设置</h3>
+    <p class="muted">
+      12306 不返回跨域头，浏览器无法直连，必须经过代理。默认使用当前站点同源的 <code>/api</code>；
+      部署到 GitHub Pages 时，请填入你自己部署的 Cloudflare Worker 地址。
+    </p>
+    <label for="apiInput">代理地址（API Base）</label>
+    <input id="apiInput" type="text" placeholder="如 https://kunle-proxy.xxx.workers.dev" />
+    <div class="drawer-actions">
+      <button id="apiSave" class="btn btn-primary" type="button">保存</button>
+      <button id="apiReset" class="btn btn-ghost" type="button">恢复默认（同源）</button>
+      <button id="apiTest" class="btn btn-ghost" type="button">测试连接</button>
+      <button id="drawerClose" class="btn btn-ghost" type="button">关闭</button>
+    </div>
+    <p class="muted small" id="apiHint"></p>
+  </div>
+</div>
+
+<footer class="site-footer wrap">
+  <span>车票最优助手 · 开源免费</span>
+  <span id="buildInfo" class="muted"></span>
+</footer>
+
+<script src="assets/app.js"></script>
+</body>
+</html>

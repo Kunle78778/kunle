@@ -1,0 +1,8 @@
+name = "kunle-ticket-proxy"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+# 免费版即可运行；无需任何环境变量。
+# 部署命令：npx wrangler deploy
+[vars]
+SERVICE = "kunle-ticket"
