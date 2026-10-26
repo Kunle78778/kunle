@@ -130,6 +130,25 @@ node server/server.mjs
 
 想先看效果：打开 <http://127.0.0.1:8787/?demo=1>。
 
+### 手机怎么用
+
+手机用移动数据时 **github.io 在国内通常打不开**（域名被阻断，不是网站挂了）。三种可行方式：
+
+| 方式 | 能做什么 | 步骤 |
+|---|---|---|
+| **① 同一 WiFi 访问电脑**（功能最全，含截图识别） | 全部功能 | 手机连与电脑相同的 WiFi，浏览器打开终端里打印的「手机:」地址，例如 `http://192.168.111.145:8787`。首次需在 Windows 防火墙弹窗里点「允许」 |
+| **② 单文件离线版**（外出/流量可用） | 除截图 OCR 外全部功能 | 用微信/QQ 把仓库根目录的 [`standalone.html`](standalone.html) 发到手机，用浏览器打开即可 |
+| **③ 手机挂代理** | 线上完整版 | 手机安装 Clash 等客户端，连同一订阅后访问 GitHub Pages 地址 |
+
+> 单文件版由 `npm run build` 生成（把 CSS/JS 全部内联成一个 158KB 的 HTML）。
+> 它打开后顶部会显示「离线版」，截图区域会置灰——因为 OCR 依赖本机 Windows 服务，手机上没有。
+
+局域网访问还需要放行端口（管理员 PowerShell 执行一次）：
+
+```powershell
+netsh advfirewall firewall add rule name="kunle-ticket-8787" dir=in action=allow protocol=TCP localport=8787
+```
+
 ### 没有 OCR 也能用
 
 - 直接「粘贴文本」：每行一趟车，字段顺序随意

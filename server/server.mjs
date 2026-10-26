@@ -241,7 +241,26 @@ const server = http.createServer(async (req, res) => {
 
 ocrAvailable = await probeOcr();
 
+/** 列出本机局域网地址，方便手机在同一 WiFi 下访问 */
+function lanUrls(port) {
+  const out = [];
+  try {
+    for (const list of Object.values(os.networkInterfaces())) {
+      for (const ni of list || []) {
+        if (ni.family === 'IPv4' && !ni.internal) out.push(`http://${ni.address}:${port}`);
+      }
+    }
+  } catch {
+    /* 忽略 */
+  }
+  return out;
+}
+
 server.listen(PORT, () => {
-  console.log(`kunle 车票最优助手已启动:  http://127.0.0.1:${PORT}`);
+  console.log('kunle 车票最优助手已启动');
+  console.log(`  本机: http://127.0.0.1:${PORT}`);
+  for (const u of lanUrls(PORT)) {
+    console.log(`  手机: ${u}   （同一 WiFi 可访问，需在防火墙提示中允许 Node）`);
+  }
   console.log(`本地 OCR 引擎: ${ocrAvailable ? '可用（Windows.Media.Ocr）' : '不可用（请改用粘贴文本）'}`);
 });

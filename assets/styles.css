@@ -125,6 +125,12 @@ textarea { resize: vertical; line-height: 1.55; }
 }
 .dropzone:hover, .dropzone:focus-visible { border-color: var(--brand); background: rgba(37,99,235,.06); outline: none; }
 .dropzone.is-drag { border-color: var(--accent); background: rgba(124,58,237,.1); transform: scale(.995); }
+.dropzone.is-disabled {
+  opacity: .5;
+  cursor: not-allowed;
+  pointer-events: none;
+  filter: grayscale(.6);
+}
 .dz-icon { font-size: 28px; }
 .dz-title { font-weight: 600; font-size: 14.5px; }
 .dz-sub { color: var(--muted); font-size: 12.5px; }

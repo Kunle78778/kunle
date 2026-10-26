@@ -9,7 +9,8 @@
     "dev": "node server/server.mjs",
     "test": "node --test",
     "test:watch": "node --test --watch",
-    "qa": "node tools/qa.mjs"
+    "qa": "node tools/qa.mjs",
+    "build": "node tools/build-standalone.mjs"
   },
   "keywords": ["train", "ticket", "ocr", "optimization", "pareto", "12306"],
   "engines": {

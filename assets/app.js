@@ -331,6 +331,13 @@
    * OCR
    * ------------------------------------------------------------------ */
   async function ocrImage(file) {
+    if (window.__KUNLE_STANDALONE__) {
+      setOcrStatus(
+        '离线单文件版没有截图识别（识别需要本机 Windows OCR 服务）。请改用「粘贴文本」或「导入 CSV」。',
+        'error'
+      );
+      return;
+    }
     if (!file) return;
     if (!/^image\//.test(file.type) && !/\.(png|jpe?g|webp|bmp|gif)$/i.test(file.name || '')) {
       setOcrStatus('请选择图片文件（png / jpg / webp / bmp）', 'error');
@@ -1272,14 +1279,26 @@
     initA11y();
     renderTable();
     renderHistory();
-    checkEngine();
-    registerServiceWorker();
+
+    const standalone = Boolean(window.__KUNLE_STANDALONE__);
+    if (standalone) {
+      el.engineBadge.textContent = '离线版 · 无 OCR';
+      el.engineBadge.className = 'badge badge-muted';
+      el.engineBadge.title = '单文件离线版：支持粘贴文本、CSV、计算、图表、报告；不支持截图识别';
+      el.dropzone.classList.add('is-disabled');
+      el.dropzone.setAttribute('aria-disabled', 'true');
+      setOcrStatus(
+        '当前是<b>离线单文件版</b>：没有截图识别，但粘贴文本 / CSV 导入 / 最优计算 / 图表 / 报告导出都能用。',
+        ''
+      );
+    } else {
+      checkEngine();
+      registerServiceWorker();
+      checkVersion();
+    }
 
     el.buildInfo.textContent = `最后更新：${new Date(document.lastModified).toLocaleString('zh-CN')}`;
     if (el.versionTag) el.versionTag.textContent = `v${BUILD}`;
-
-    // 与服务器上的 version.json 比对，发现浏览器还在跑旧版就自动清缓存更新
-    checkVersion();
 
     const params = new URLSearchParams(location.search);
     if (params.get('demo') === '1') {
