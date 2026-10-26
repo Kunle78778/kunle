@@ -344,7 +344,11 @@ async function main() {
   check('无 console.error', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));
 
   /* ---- Service Worker 策略（避免新旧版本混用） ---- */
-  const sw = await fetch(new URL('sw.js', URL_UNDER_TEST)).then((r) => r.text());
+  // 在浏览器上下文里取，避免 Node 的 fetch 不走系统代理导致误报
+  const sw = await cdp.eval(`
+    const r = await fetch('sw.js', { cache: 'no-store' });
+    return await r.text();
+  `);
   check(
     'Service Worker 已升级且改为网络优先',
     /kunle-v4/.test(sw) && /networkFirst|NETWORK_FIRST/.test(sw),
