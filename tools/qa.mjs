@@ -397,6 +397,40 @@ async function main() {
   check('打印方案单生成完整内容', printTest.hasTitle && printTest.hasTable && printTest.len > 300,
     `长度 ${printTest.len}`);
 
+  /* ---- 截图粘贴 → OCR（仅本地，线上没有 OCR 服务） ---- */
+  const isLocalTarget = /127\.0\.0\.1|localhost|192\.168\./.test(URL_UNDER_TEST);
+  if (isLocalTarget) {
+    const pasteTest = await cdp.eval(`
+      const before = document.querySelectorAll('#rowsBody tr').length;
+      const res = await fetch('tests/fixtures/ticket.png', { cache: 'no-store' });
+      const blob = await res.blob();
+      const file = new File([blob], 'ticket.png', { type: 'image/png' });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+
+      const deadline = Date.now() + 25000;
+      let status = '';
+      while (Date.now() < deadline) {
+        status = document.getElementById('ocrStatus').textContent.replace(/\\s+/g, ' ').trim();
+        if (status.includes('识别完成') || status.includes('没有从这张图') || status.includes('识别失败')) break;
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      return {
+        before,
+        after: document.querySelectorAll('#rowsBody tr').length,
+        status: status.slice(0, 150),
+      };
+    `);
+    check(
+      '粘贴截图能触发 OCR 并写入车次',
+      pasteTest.after > pasteTest.before && /识别完成/.test(pasteTest.status),
+      `${pasteTest.before} → ${pasteTest.after} 行 ｜ ${pasteTest.status}`
+    );
+  } else {
+    console.log('· 跳过粘贴测试（线上没有本机 OCR 服务）');
+  }
+
   /* ---- 空数据状态 ---- */
   const empty = await cdp.eval(`
     document.getElementById('clearBtn').click();
@@ -442,7 +476,7 @@ async function main() {
   `);
   check(
     'Service Worker 已升级且改为网络优先',
-    /kunle-v5/.test(sw) && /networkFirst|NETWORK_FIRST/.test(sw),
+    /kunle-v6/.test(sw) && /networkFirst|NETWORK_FIRST/.test(sw),
     sw.match(/kunle-v\d+/)?.[0] || '未找到版本号'
   );
 

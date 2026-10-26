@@ -13,7 +13,7 @@
   const $ = (id) => document.getElementById(id);
 
   /** 构建号：与 version.json 对比，用于发现「浏览器还在跑旧版」 */
-  const BUILD = '3.1.1';
+  const BUILD = '3.1.2';
 
 
   const GROUPS = {
@@ -330,6 +330,20 @@
   /* ------------------------------------------------------------------ *
    * OCR
    * ------------------------------------------------------------------ */
+
+  /** 把剪贴板里的图片地址（data: 或 http）转成 File */
+  async function fileFromSrc(src) {
+    try {
+      const res = await fetch(src, { credentials: 'omit' });
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      if (!blob.type || blob.type.indexOf('image') !== 0) return null;
+      return new File([blob], 'clipboard.png', { type: blob.type });
+    } catch {
+      return null;
+    }
+  }
+
   async function ocrImage(file) {
     if (window.__KUNLE_STANDALONE__) {
       setOcrStatus(
@@ -1040,10 +1054,16 @@
     });
 
     document.addEventListener('paste', (e) => {
-      const items = e.clipboardData && e.clipboardData.items;
-      if (!items) return;
+      const dt = e.clipboardData;
+      if (!dt) return;
+
+      const inTextField =
+        e.target && (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT');
+
+      // 1) 剪贴板里直接就是图片文件（Windows 截图工具、微信/QQ 截图等）
+      const items = dt.items ? Array.from(dt.items) : [];
       for (const it of items) {
-        if (it.type && it.type.indexOf('image') === 0) {
+        if (it.kind === 'file' && it.type && it.type.indexOf('image') === 0) {
           const f = it.getAsFile();
           if (f) {
             e.preventDefault();
@@ -1051,6 +1071,56 @@
             return;
           }
         }
+      }
+
+      // 1b) 部分环境把图片放在 clipboardData.files 而不是 items
+      const files = dt.files ? Array.from(dt.files) : [];
+      for (const f of files) {
+        if (f && f.type && f.type.indexOf('image') === 0) {
+          e.preventDefault();
+          ocrImage(f);
+          return;
+        }
+      }
+
+      // 在输入框里粘贴文本时保持默认行为，不要弹提示
+      if (inTextField) return;
+
+      // 2) 部分软件复制图片时放的是 HTML 片段（<img src="...">）
+      const html = dt.getData ? dt.getData('text/html') : '';
+      if (html) {
+        const m = /<img[^>]+src=["'](data:image\/[^"']+|https?:\/\/[^"']+)["']/i.exec(html);
+        if (m) {
+          e.preventDefault();
+          setOcrStatus('<span class="spinner"></span>正在从剪贴板解析图片…', 'loading');
+          fileFromSrc(m[1]).then((f) => {
+            if (f) ocrImage(f);
+            else
+              setOcrStatus(
+                '剪贴板里的图片读不出来（可能是跨域图片）。请用 <kbd>Win</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> 截屏后直接粘贴，或点击虚线框选择文件。',
+                'error'
+              );
+          });
+          return;
+        }
+      }
+
+      // 3) 只拿到图片路径：明确告诉用户该怎么做，而不是无声失败
+      const text = dt.getData ? String(dt.getData('text/plain') || '').trim() : '';
+      if (text && /\.(png|jpe?g|webp|bmp|gif)$/i.test(text)) {
+        setOcrStatus(
+          '粘贴进来的是图片<strong>路径</strong>，不是图片本身。请改用截图工具截屏后 <kbd>Ctrl</kbd>+<kbd>V</kbd>，或把文件拖进虚线框。',
+          'error'
+        );
+        return;
+      }
+
+      // 4) 剪贴板里完全没有图片数据
+      if (!text) {
+        setOcrStatus(
+          '剪贴板里没有检测到图片。截图后请确认工具把图片（而不是文件路径或文字）放进了剪贴板；也可以点击虚线框选择文件。',
+          'error'
+        );
       }
     });
 

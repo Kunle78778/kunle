@@ -11,7 +11,7 @@
  *   - 每次发版提升 VERSION，激活时清掉所有旧缓存
  */
 
-const VERSION = 'kunle-v5';
+const VERSION = 'kunle-v6';
 const CACHE = `static-${VERSION}`;
 
 const PRECACHE = [

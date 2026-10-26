@@ -41,8 +41,12 @@
   }
 
   function parseTime(token) {
-    const m = /^(\d{1,2}):(\d{2})$/.exec(token);
-    if (!m) return null;
+    let m = /^(\d{1,2}):(\d{2})$/.exec(token);
+    if (!m) {
+      // OCR 常把冒号吞掉：07 45 / 0745 都按时间处理（时 0-23、分 0-59 才算）
+      m = /^(\d{1,2})(\d{2})$/.exec(token);
+      if (!m) return null;
+    }
     const h = Number(m[1]);
     const min = Number(m[2]);
     if (h > 23 || min > 59) return null;
@@ -156,8 +160,6 @@
       }
     }
 
-    if (!row.code) return null;
-
     row.depart = times[0] || null;
     row.arrive = times[1] || null;
     row.fromStation = places[0] || '';
@@ -167,6 +169,17 @@
     if (row.durationMin == null && row.depart && row.arrive) {
       row.durationMin = durationBetween(row.depart, row.arrive);
     }
+
+    // OCR 漏识车次号时，如果这一行还有时间/票价，说明只是「车次那一格没认出来」，
+    // 保留该行并在表格里留空，让用户补全 —— 静默丢弃才是真正的问题。
+    if (!row.code) {
+      const hasEnough =
+        (row.depart || row.arrive) && (row.price != null || row.durationMin != null);
+      if (!hasEnough) return null;
+      row.code = '';
+      row.missingCode = true;
+    }
+
     return row;
   }
 

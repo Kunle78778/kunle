@@ -90,8 +90,25 @@ test('extractRow 处理跨夜车次', () => {
   assert.equal(row.durationMin, 719);
 });
 
-test('extractRow 没有车次号返回 null', () => {
-  assert.equal(P.extractRow(['北京南', '06:30', '¥598']), null);
+test('parseTime 容忍 OCR 丢失冒号', () => {
+  assert.equal(P.parseTime('0745'), '07:45');
+  assert.equal(P.parseTime('7:45'), '07:45');
+  assert.equal(P.parseTime('1141'), '11:41');
+  assert.equal(P.parseTime('2461'), null); // 时超 23
+  assert.equal(P.parseTime('0775'), null); // 分超 59
+});
+
+test('extractRow 缺车次但有时间票价时保留该行', () => {
+  const row = P.extractRow(['北京南', '06:30', '¥598']);
+  assert.ok(row, '不应静默丢弃：这一行只是车次那一格没认出来');
+  assert.equal(row.code, '');
+  assert.equal(row.missingCode, true);
+  assert.equal(row.price, 598);
+});
+
+test('extractRow 信息不足时返回 null', () => {
+  assert.ok(!P.extractRow(['北京南']));
+  assert.ok(!P.extractRow(['二等座 有']));
 });
 
 test('extractRow 识别无票席别', () => {
@@ -142,6 +159,20 @@ test('fromOcrLines 多行截图逐行解析', () => {
 test('fromOcrLines 空输入返回空数组', () => {
   assert.deepEqual(P.fromOcrLines([]), []);
   assert.deepEqual(P.fromOcrLines(null), []);
+});
+
+test('fromOcrLines 保留漏识车次号的行，交由用户补全', () => {
+  const lines = [
+    { text: '北京南', x: 400, y: 70, h: 40 },
+    { text: '06:30', x: 220, y: 68, h: 40 },
+    { text: '上海虹桥', x: 980, y: 67, h: 40 },
+    { text: '¥598.0', x: 1400, y: 68, h: 40 },
+  ];
+  const rows = P.fromOcrLines(lines);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].code, '');
+  assert.equal(rows[0].price, 598);
+  assert.equal(rows[0].depart, '06:30');
 });
 
 /* ---------------- 粘贴文本 ---------------- */
