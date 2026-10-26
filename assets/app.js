@@ -1178,21 +1178,23 @@
     if (!('serviceWorker' in navigator)) return;
     if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
 
+    // 首次访问时 controller 为空：此时 Service Worker 接管不应引发刷新，
+    // 否则用户刚录入的数据会被整页重载清掉。
+    const hadController = Boolean(navigator.serviceWorker.controller);
+
     navigator.serviceWorker
       .register('sw.js', { updateViaCache: 'none' })
       .then((reg) => {
-        // 主动检查更新，避免长期停留在旧缓存
         reg.update().catch(() => {});
-        reg.addEventListener?.('updatefound', () => {});
       })
       .catch(() => {
         /* 离线缓存失败不影响主流程 */
       });
 
-    // 新版本接管后自动刷新一次，避免新旧脚本混用
+    // 只有在「已有一个控制器、又被新版本替换」时才刷新一次，避免新旧脚本混用
     let reloaded = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (reloaded) return;
+      if (!hadController || reloaded) return;
       reloaded = true;
       location.reload();
     });

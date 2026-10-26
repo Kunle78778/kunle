@@ -161,6 +161,7 @@ async function main() {
     console.log(html);
   }
 
+  try {
   const n = await cdp.eval(`return document.querySelectorAll('.item').length`);
   check('示例数据生成 17 个方案', n === 17, `实际 ${n}`);
 
@@ -218,6 +219,10 @@ async function main() {
   check('权重滑块改变综合最优排序', weightOk.changed, `${weightOk.cheapFirst}  ⇄  ${weightOk.timeFirst}`);
 
   /* ---- 行程详情：打开 + Esc 关闭 ---- */
+  // 等待列表稳定（避免刚好撞上 Service Worker 接管导致的短暂空白）
+  const hasItem = await waitFor(async () => cdp.eval(`return !!document.querySelector('.item')`));
+  check('列表项可用', Boolean(hasItem));
+
   const detail = await cdp.eval(`
     document.querySelector('.item').click();
     await new Promise(r => setTimeout(r, 150));
@@ -321,6 +326,10 @@ async function main() {
     return { hintVisible, resultsHidden, detailHidden };
   `);
   check('清空后回到空状态', empty.hintVisible && empty.resultsHidden && empty.detailHidden, JSON.stringify(empty));
+
+  } catch (err) {
+    check('检查流程未中断', false, String(err && err.message ? err.message : err));
+  }
 
   /* ---- 控制台错误 ---- */
   const errors = cdp.events
