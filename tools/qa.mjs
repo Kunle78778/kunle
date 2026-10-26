@@ -316,6 +316,87 @@ async function main() {
   `);
   check('数据校验能发现缺车次', validate.errors >= 1 && validate.blocking, JSON.stringify(validate));
 
+  /* ---- 最多分段 = 1：只算直达 ---- */
+  const maxLegsTest = await cdp.eval(`
+    const sel = document.getElementById('maxLegs');
+    sel.value = '1';
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    document.getElementById('computeBtn').click();
+    await new Promise(r => setTimeout(r, 350));
+    const status = document.getElementById('status').textContent.replace(/\\s+/g, ' ').trim();
+    const items = document.querySelectorAll('.item').length;
+    return { status, items };
+  `);
+  check(
+    '最多分段=1 时只输出直达方案',
+    maxLegsTest.items === 5 && /直达 5/.test(maxLegsTest.status),
+    maxLegsTest.status
+  );
+
+  /* ---- 三种筛选 ---- */
+  const filterTests = await cdp.eval(`
+    const setVal = (id, v) => { const e = document.getElementById(id); e.value = v; e.dispatchEvent(new Event('change', { bubbles: true })); };
+    const setBox = (id, v) => { const e = document.getElementById(id); e.checked = v; e.dispatchEvent(new Event('change', { bubbles: true })); };
+
+    setVal('maxLegs', '3');
+    document.getElementById('computeBtn').click();
+    await new Promise(r => setTimeout(r, 400));
+    const total = document.querySelectorAll('.item').length;
+
+    setBox('onlyDirect', true);
+    await new Promise(r => setTimeout(r, 180));
+    const onlyDirect = document.querySelectorAll('.item').length;
+    setBox('onlyDirect', false);
+
+    setBox('fExcludeOvernight', true);
+    await new Promise(r => setTimeout(r, 180));
+    const noOvernight = document.querySelectorAll('.item').length;
+    setBox('fExcludeOvernight', false);
+
+    setVal('fSeat', '二等座');
+    await new Promise(r => setTimeout(r, 180));
+    const seat = document.querySelectorAll('.item').length;
+    setVal('fSeat', '');
+    await new Promise(r => setTimeout(r, 180));
+    const back = document.querySelectorAll('.item').length;
+
+    return { total, onlyDirect, noOvernight, seat, back };
+  `);
+  check('只看直达筛选', filterTests.onlyDirect === 5, `直达 ${filterTests.onlyDirect} / 共 ${filterTests.total}`);
+  check('排除跨夜筛选生效', filterTests.noOvernight < filterTests.total, `${filterTests.noOvernight} < ${filterTests.total}`);
+  check('席别筛选生效且可还原', filterTests.seat > 0 && filterTests.back === filterTests.total,
+    `二等座 ${filterTests.seat} → 还原 ${filterTests.back}`);
+
+  /* ---- 历史回填 ---- */
+  const restoreTest = await cdp.eval(`
+    const btn = document.querySelector('[data-restore]');
+    if (!btn) return { ok: false, reason: '没有历史记录' };
+    btn.click();
+    await new Promise(r => setTimeout(r, 300));
+    return {
+      ok: true,
+      rows: document.querySelectorAll('#rowsBody tr').length,
+      resultsHidden: document.getElementById('results').hidden,
+      detailHidden: document.getElementById('detailCard').hidden,
+    };
+  `);
+  check('历史回填恢复车次并清空旧结果',
+    restoreTest.ok && restoreTest.rows > 0 && restoreTest.resultsHidden && restoreTest.detailHidden,
+    JSON.stringify(restoreTest));
+
+  /* ---- 打印方案单（拦截 window.print） ---- */
+  const printTest = await cdp.eval(`
+    window.print = () => {};
+    document.getElementById('computeBtn').click();
+    await new Promise(r => setTimeout(r, 400));
+    document.getElementById('printBtn').click();
+    await new Promise(r => setTimeout(r, 250));
+    const html = document.getElementById('printArea').innerHTML;
+    return { len: html.length, hasTitle: html.includes('车票最优方案单'), hasTable: html.includes('<table') };
+  `);
+  check('打印方案单生成完整内容', printTest.hasTitle && printTest.hasTable && printTest.len > 300,
+    `长度 ${printTest.len}`);
+
   /* ---- 空数据状态 ---- */
   const empty = await cdp.eval(`
     document.getElementById('clearBtn').click();
@@ -330,6 +411,16 @@ async function main() {
   } catch (err) {
     check('检查流程未中断', false, String(err && err.message ? err.message : err));
   }
+
+  /* ---- reset.html 真跑一次：清缓存后应跳回最新版 ---- */
+  await cdp.send('Page.navigate', { url: new URL('reset.html', URL_UNDER_TEST).href });
+  const resetDone = await waitFor(
+    async () =>
+      cdp.eval(`return location.search.includes('fresh=') || location.pathname.endsWith('/index.html')`),
+    { timeout: 12000 }
+  );
+  const resetHref = await cdp.eval(`return location.href`).catch(() => '');
+  check('reset.html 清完缓存后跳回最新版', Boolean(resetDone), String(resetHref).slice(0, 90));
 
   /* ---- 控制台错误 ---- */
   const errors = cdp.events
