@@ -1,13 +1,16 @@
 {
   "name": "kunle-ticket",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "private": true,
   "description": "车票最优助手：粘贴 12306 截图，本地 OCR 识别后计算最划算的买法与最省时的走法",
   "type": "module",
   "scripts": {
     "start": "node server/server.mjs",
-    "dev": "node server/server.mjs"
+    "dev": "node server/server.mjs",
+    "test": "node --test",
+    "test:watch": "node --test --watch"
   },
+  "keywords": ["train", "ticket", "ocr", "optimization", "pareto", "12306"],
   "engines": {
     "node": ">=18"
   },

@@ -1,0 +1,29 @@
+{
+  "name": "车票最优助手",
+  "short_name": "车票助手",
+  "description": "粘贴 12306 截图，本地识别后计算最划算、最省时的购票方案",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f4f6fb",
+  "theme_color": "#2563eb",
+  "lang": "zh-CN",
+  "categories": ["travel", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "载入示例",
+      "short_name": "示例",
+      "url": "./index.html?demo=1",
+      "description": "用内置示例数据快速查看效果"
+    }
+  ]
+}

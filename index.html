@@ -4,7 +4,9 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>车票最优助手 · 截图算最优购票方案</title>
-<meta name="description" content="粘贴 12306 车票截图，本地 OCR 识别后计算最省钱、最省时的购票方案，支持中转组合与性价比排序。数据不联网上传。" />
+<meta name="description" content="粘贴 12306 车票截图，本地 OCR 识别后计算最省钱、最省时的购票方案，支持两次中转、性价比前沿、方案对比与历史记录。" />
+<meta name="theme-color" content="#2563eb" />
+<link rel="manifest" href="manifest.json" />
 <link rel="stylesheet" href="assets/styles.css" />
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚄</text></svg>" />
 </head>
@@ -20,14 +22,16 @@
       </div>
     </div>
     <div class="header-actions">
-      <span id="engineBadge" class="badge badge-muted">本地计算引擎：检测中</span>
+      <span id="engineBadge" class="badge badge-muted">引擎：检测中</span>
+      <button id="themeBtn" class="btn btn-ghost btn-icon" type="button" title="切换主题">🌓</button>
+      <button id="printBtn" class="btn btn-ghost btn-icon" type="button" title="打印方案单">🖨</button>
     </div>
   </div>
 </header>
 
 <main class="wrap">
 
-  <!-- 录入 -->
+  <!-- ① 录入 -->
   <section class="card input-card">
     <div class="card-head">
       <h2 class="section-title">① 录入车次</h2>
@@ -48,6 +52,9 @@
 G3 北京南 上海虹桥 07:00 11:41 04时41分 二等座 有 ¥667.0"></textarea>
         <div class="paste-actions">
           <button id="parseTextBtn" class="btn btn-ghost" type="button">解析文本</button>
+          <button id="csvImportBtn" class="btn btn-ghost" type="button">导入 CSV</button>
+          <button id="csvExportBtn" class="btn btn-ghost" type="button">导出 CSV</button>
+          <input id="csvFileInput" type="file" accept=".csv,text/csv" hidden />
         </div>
       </div>
     </div>
@@ -55,10 +62,11 @@ G3 北京南 上海虹桥 07:00 11:41 04时41分 二等座 有 ¥667.0"></textar
     <div id="ocrStatus" class="status status-inline" hidden></div>
 
     <div class="bulk-bar">
-      <span class="muted small">批量设置分组：</span>
+      <span class="muted small">批量分组：</span>
       <button class="btn btn-mini" data-group="direct" type="button">直达</button>
       <button class="btn btn-mini" data-group="leg1" type="button">第一程</button>
       <button class="btn btn-mini" data-group="leg2" type="button">第二程</button>
+      <button class="btn btn-mini" data-group="leg3" type="button">第三程</button>
       <span class="spacer"></span>
       <button id="addRowBtn" class="btn btn-mini" type="button">+ 添加一行</button>
       <button id="demoBtn" class="btn btn-mini" type="button">载入示例</button>
@@ -84,12 +92,12 @@ G3 北京南 上海虹桥 07:00 11:41 04时41分 二等座 有 ¥667.0"></textar
         <tbody id="rowsBody"></tbody>
       </table>
       <p id="emptyHint" class="muted small empty-hint">
-        还没有数据。截图识别、粘贴文本，或点「载入示例」看看效果。
+        还没有数据。截图识别、粘贴文本、导入 CSV，或点「载入示例」看看效果。
       </p>
     </div>
   </section>
 
-  <!-- 计算参数 -->
+  <!-- ② 参数 -->
   <section class="card control-card">
     <div class="control-grid">
       <div class="field">
@@ -97,12 +105,20 @@ G3 北京南 上海虹桥 07:00 11:41 04时41分 二等座 有 ¥667.0"></textar
         <input id="hubInput" type="text" placeholder="如：南京" />
       </div>
       <div class="field">
-        <label for="minTransfer">最少换乘时间（分钟）</label>
+        <label for="minTransfer">最少换乘（分钟）</label>
         <input id="minTransfer" type="number" min="5" max="180" value="30" />
       </div>
       <div class="field">
         <label for="maxWait">最长等待（分钟）</label>
         <input id="maxWait" type="number" min="30" max="1440" value="480" />
+      </div>
+      <div class="field">
+        <label for="maxLegs">最多分段</label>
+        <select id="maxLegs">
+          <option value="1">1 段（只算直达）</option>
+          <option value="2" selected>2 段（一次中转）</option>
+          <option value="3">3 段（两次中转）</option>
+        </select>
       </div>
       <div class="weight field">
         <label for="weightInput">权衡：省钱 ↔ 省时</label>
@@ -115,22 +131,101 @@ G3 北京南 上海虹桥 07:00 11:41 04时41分 二等座 有 ¥667.0"></textar
     </div>
   </section>
 
-  <!-- 结果 -->
   <section id="status" class="status" hidden></section>
 
+  <!-- 数据校验 -->
+  <section id="issuesCard" class="card issues-card" hidden>
+    <div class="card-head">
+      <h2 class="section-title">数据检查</h2>
+      <span class="muted small" id="issuesSummary"></span>
+    </div>
+    <ul id="issuesList" class="issues-list"></ul>
+  </section>
+
+  <!-- 统计条 -->
+  <section id="statsBar" class="stats-bar" hidden>
+    <div class="stat"><span class="stat-label">方案总数</span><b id="stCount">—</b></div>
+    <div class="stat"><span class="stat-label">价格区间</span><b id="stPrice">—</b></div>
+    <div class="stat"><span class="stat-label">最短耗时</span><b id="stTime">—</b></div>
+    <div class="stat"><span class="stat-label">比最便宜直达省</span><b id="stSaved">—</b></div>
+    <div class="stat"><span class="stat-label">性价比前沿</span><b id="stPareto">—</b></div>
+  </section>
+
+  <!-- 推荐 -->
   <section id="recommend" class="recommend" hidden>
     <h2 class="section-title">推荐方案</h2>
     <div class="recommend-grid" id="recommendGrid"></div>
   </section>
 
+  <!-- 图表 -->
+  <section id="chartCard" class="card chart-card" hidden>
+    <div class="card-head">
+      <h2 class="section-title">价格 × 耗时分布</h2>
+      <span class="muted small">左下角最理想；绿色虚线是性价比前沿</span>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="chartCanvas" height="340"></canvas>
+    </div>
+    <p class="muted small" id="chartHint">悬停查看明细，点击可在下方列表定位。</p>
+  </section>
+
+  <!-- 筛选 -->
+  <section class="card filter-card">
+    <div class="card-head">
+      <h2 class="section-title">筛选条件</h2>
+      <button id="filterToggle" class="btn btn-mini" type="button">收起</button>
+    </div>
+    <div id="filterPanel" class="filter-grid">
+      <div class="field">
+        <label for="fSeat">席别包含</label>
+        <input id="fSeat" type="text" placeholder="如：二等座" />
+      </div>
+      <div class="field">
+        <label for="fDepartFrom">发车时间从</label>
+        <input id="fDepartFrom" type="text" placeholder="06:00" />
+      </div>
+      <div class="field">
+        <label for="fDepartTo">发车时间到</label>
+        <input id="fDepartTo" type="text" placeholder="22:00" />
+      </div>
+      <div class="field">
+        <label for="fMaxPrice">票价上限</label>
+        <input id="fMaxPrice" type="number" min="0" placeholder="不填为不限" />
+      </div>
+      <div class="field">
+        <label for="fMaxDuration">耗时上限(分)</label>
+        <input id="fMaxDuration" type="number" min="0" placeholder="不填为不限" />
+      </div>
+      <div class="field">
+        <label for="fMaxTransfers">最多中转次数</label>
+        <select id="fMaxTransfers">
+          <option value="">不限</option>
+          <option value="0">0 次（直达）</option>
+          <option value="1">1 次</option>
+          <option value="2">2 次</option>
+        </select>
+      </div>
+      <label class="switch switch-sm filter-check">
+        <input id="fExcludeOvernight" type="checkbox" />
+        <span>排除跨夜到达</span>
+      </label>
+      <button id="resetFiltersBtn" class="btn btn-ghost btn-mini" type="button">重置筛选</button>
+    </div>
+  </section>
+
+  <!-- 结果 -->
   <section id="results" class="card results-card" hidden>
     <div class="results-head">
       <h2 class="section-title" id="resultsTitle">全部方案</h2>
-      <div class="tabs" id="sortTabs" role="tablist">
-        <button class="tab is-active" data-sort="score" type="button">综合最优</button>
-        <button class="tab" data-sort="price" type="button">最便宜</button>
-        <button class="tab" data-sort="time" type="button">最省时</button>
-        <button class="tab" data-sort="depart" type="button">最早出发</button>
+      <div class="head-actions">
+        <div class="tabs" id="sortTabs" role="tablist" aria-label="方案排序方式">
+          <button class="tab is-active" data-sort="score" type="button">综合最优</button>
+          <button class="tab" data-sort="price" type="button">最便宜</button>
+          <button class="tab" data-sort="time" type="button">最省时</button>
+          <button class="tab" data-sort="depart" type="button">最早出发</button>
+        </div>
+        <button id="exportMdBtn" class="btn btn-mini" type="button">导出报告 MD</button>
+        <button id="exportHtmlBtn" class="btn btn-mini" type="button">导出报告 HTML</button>
       </div>
     </div>
     <div class="filters">
@@ -147,11 +242,53 @@ G3 北京南 上海虹桥 07:00 11:41 04时41分 二等座 有 ¥667.0"></textar
     <div id="list" class="list"></div>
   </section>
 
+  <!-- 行程详情 -->
+  <section id="detailCard" class="card detail-card" hidden>
+    <div class="card-head">
+      <h2 class="section-title" id="detailTitle">行程详情</h2>
+      <button id="detailClose" class="btn btn-mini" type="button">关闭</button>
+    </div>
+    <div id="detailTimeline" class="timeline-host"></div>
+    <div id="detailBody" class="detail-body"></div>
+  </section>
+
+  <!-- 历史 -->
+  <section id="historyCard" class="card history-card" hidden>
+    <div class="card-head">
+      <h2 class="section-title">历史记录</h2>
+      <button id="historyClear" class="btn btn-mini btn-danger" type="button">清空历史</button>
+    </div>
+    <div id="historyList" class="history-list"></div>
+  </section>
+
   <p class="disclaimer">
     本工具不上传、不抓取任何数据：截图由你提供，OCR 在 Windows 本机完成，算法只在你填的数据里找最优解。
     票价与余票请以 12306 官方页面为准。
   </p>
 </main>
+
+<!-- 对比浮动条 -->
+<div id="compareBar" class="compare-bar" hidden>
+  <span>已选 <b id="compareCount">0</b> 个方案</span>
+  <button id="compareOpen" class="btn btn-primary btn-mini" type="button">并排对比</button>
+  <button id="compareClear" class="btn btn-ghost btn-mini" type="button">清空</button>
+</div>
+
+<!-- 对比弹窗 -->
+<div id="compareModal" class="modal" hidden>
+  <div class="modal-inner card">
+    <div class="card-head">
+      <h2 class="section-title">方案对比</h2>
+      <button id="compareClose" class="btn btn-mini" type="button">关闭</button>
+    </div>
+    <div class="table-wrap">
+      <table id="compareTable" class="compare-table"></table>
+    </div>
+  </div>
+</div>
+
+<!-- 打印专用 -->
+<div id="printArea" class="print-only"></div>
 
 <footer class="site-footer wrap">
   <span>车票最优助手 · 本地 OCR + 本地计算</span>
@@ -160,6 +297,12 @@ G3 北京南 上海虹桥 07:00 11:41 04时41分 二等座 有 ¥667.0"></textar
 
 <script src="assets/parse.js"></script>
 <script src="assets/algo.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/chart.js"></script>
+<script src="assets/timeline.js"></script>
+<script src="assets/validate.js"></script>
+<script src="assets/report.js"></script>
+<script src="assets/a11y.js"></script>
 <script src="assets/app.js"></script>
 </body>
 </html>

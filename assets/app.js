@@ -1,8 +1,10 @@
 /**
- * app.js —— 界面控制
+ * app.js —— 界面控制器
  *
- * 流程：录入截图/文本 → 本地 OCR（Windows 引擎）→ 解析成表格 → 人工核对 → 计算最优方案
- * 全程不联网抓取任何数据，只有图片送到本机的 Node 服务做 OCR。
+ * 职责：把「录入 → 解析 → 计算 → 展示」串起来，并管理
+ *   设置持久化、筛选、图表、方案对比、历史记录、CSV、打印、主题
+ *
+ * 计算全部在本地完成；只有截图会送到本机 Node 服务做 OCR。
  */
 
 (() => {
@@ -14,67 +16,70 @@
     direct: '直达',
     leg1: '第一程',
     leg2: '第二程',
+    leg3: '第三程',
+  };
+
+  const SORT_LABEL = {
+    score: '综合最优',
+    price: '最便宜',
+    time: '最省时',
+    depart: '最早出发',
   };
 
   const state = {
     rows: [],
     options: [],
+    filtered: [],
+    compare: new Set(),
     sort: 'score',
     weight: 55,
-    onlyBuyable: false,
-    onlyDirect: false,
+    settings: null,
+    chart: null,
+    history: [],
     busy: false,
   };
 
-  const el = {
-    dropzone: $('dropzone'),
-    fileInput: $('fileInput'),
-    pasteArea: $('pasteArea'),
-    parseTextBtn: $('parseTextBtn'),
-    ocrStatus: $('ocrStatus'),
-    rowsBody: $('rowsBody'),
-    emptyHint: $('emptyHint'),
-    addRowBtn: $('addRowBtn'),
-    demoBtn: $('demoBtn'),
-    clearBtn: $('clearBtn'),
-    hubInput: $('hubInput'),
-    minTransfer: $('minTransfer'),
-    maxWait: $('maxWait'),
-    weight: $('weightInput'),
-    weightOut: $('weightOut'),
-    computeBtn: $('computeBtn'),
-    status: $('status'),
-    recommend: $('recommend'),
-    recommendGrid: $('recommendGrid'),
-    results: $('results'),
-    resultsTitle: $('resultsTitle'),
-    list: $('list'),
-    tabs: $('sortTabs'),
-    countInfo: $('countInfo'),
-    onlyBuyable: $('onlyBuyable'),
-    onlyDirect: $('onlyDirect'),
-    engineBadge: $('engineBadge'),
-    buildInfo: $('buildInfo'),
-  };
+  /* ------------------------------------------------------------------ *
+   * 元素
+   * ------------------------------------------------------------------ */
+  const el = {};
+  function cacheElements() {
+    const ids = [
+      'engineBadge', 'themeBtn', 'printBtn',
+      'dropzone', 'fileInput', 'pasteArea', 'parseTextBtn',
+      'csvImportBtn', 'csvExportBtn', 'csvFileInput',
+      'ocrStatus', 'rowsBody', 'emptyHint', 'addRowBtn', 'demoBtn', 'clearBtn',
+      'hubInput', 'minTransfer', 'maxWait', 'maxLegs', 'weightInput', 'weightOut', 'computeBtn',
+      'status', 'statsBar', 'stCount', 'stPrice', 'stTime', 'stSaved', 'stPareto',
+      'recommend', 'recommendGrid',
+      'chartCard', 'chartCanvas', 'chartHint',
+      'filterToggle', 'filterPanel', 'fSeat', 'fDepartFrom', 'fDepartTo',
+      'fMaxPrice', 'fMaxDuration', 'fMaxTransfers', 'fExcludeOvernight', 'resetFiltersBtn',
+      'results', 'resultsTitle', 'sortTabs', 'onlyBuyable', 'onlyDirect', 'countInfo', 'list',
+      'exportMdBtn', 'exportHtmlBtn', 'issuesCard', 'issuesSummary', 'issuesList',
+      'detailCard', 'detailTitle', 'detailTimeline', 'detailBody', 'detailClose',
+      'historyCard', 'historyList', 'historyClear',
+      'compareBar', 'compareCount', 'compareOpen', 'compareClear',
+      'compareModal', 'compareTable', 'compareClose',
+      'printArea', 'buildInfo',
+    ];
+    for (const id of ids) el[id] = $(id);
+  }
 
+  /* ------------------------------------------------------------------ *
+   * 小工具
+   * ------------------------------------------------------------------ */
   let seq = 0;
   const uid = () => 'r' + ++seq;
 
-  /* ------------------------------------------------------------------ *
-   * 通用工具
-   * ------------------------------------------------------------------ */
   function escapeHtml(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
     })[c]);
   }
 
-  function fmtDuration(min) {
-    if (min == null) return '—';
-    const h = Math.floor(min / 60);
-    const m = Math.round(min % 60);
-    return h > 0 ? `${h}小时${String(m).padStart(2, '0')}分` : `${m}分`;
-  }
+  const fmtDur = (min) => window.KunleAlgo.formatMinutes(min);
+  const money = (v) => (v == null ? '—' : '¥' + Math.round(v * 10) / 10);
 
   function setStatus(html, kind) {
     if (!html) {
@@ -99,11 +104,25 @@
     el.ocrStatus.innerHTML = html;
   }
 
+  function download(filename, content, mime) {
+    const blob = new Blob([content], { type: mime || 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   /* ------------------------------------------------------------------ *
-   * 行数据管理
+   * 行数据
    * ------------------------------------------------------------------ */
   function makeRow(data, group) {
     const d = data || {};
+    const seatAvailable =
+      d.seat && d.seat.available === false ? false : d.seatAvailable === false ? false : true;
     return {
       id: uid(),
       code: d.code || '',
@@ -113,9 +132,10 @@
       arrive: d.arrive || '',
       durationMin: d.durationMin == null ? '' : d.durationMin,
       price: d.price == null ? '' : d.price,
-      seatText: d.seat ? d.seat.name + (d.seat.text ? ' ' + d.seat.text : '') : '',
-      seatAvailable: d.seat && d.seat.available === false ? false : true,
-      group: group || 'direct',
+      seatText:
+        d.seatText || (d.seat ? d.seat.name + (d.seat.text ? ' ' + d.seat.text : '') : ''),
+      seatAvailable,
+      group: group || d.group || 'direct',
     };
   }
 
@@ -126,6 +146,10 @@
     return parsed.length;
   }
 
+  function rowsOf(group) {
+    return state.rows.filter((r) => r.group === group);
+  }
+
   function renderTable() {
     if (!state.rows.length) {
       el.rowsBody.innerHTML = '';
@@ -134,7 +158,7 @@
       el.emptyHint.hidden = true;
       el.rowsBody.innerHTML = state.rows
         .map(
-          (r, i) => `<tr data-id="${r.id}">
+          (r) => `<tr data-id="${r.id}">
             <td><input class="cell cell-code" data-field="code" value="${escapeHtml(r.code)}" placeholder="G1" /></td>
             <td><input class="cell" data-field="fromStation" value="${escapeHtml(r.fromStation)}" placeholder="出发站" /></td>
             <td><input class="cell" data-field="toStation" value="${escapeHtml(r.toStation)}" placeholder="到达站" /></td>
@@ -159,12 +183,75 @@
   }
 
   function updateCounts() {
-    const c = { direct: 0, leg1: 0, leg2: 0 };
+    const c = { direct: 0, leg1: 0, leg2: 0, leg3: 0 };
     for (const r of state.rows) c[r.group] = (c[r.group] || 0) + 1;
-    el.computeBtn.textContent =
-      state.rows.length
-        ? `计算最优方案（${c.direct} 直达 / ${c.leg1} 第一程 / ${c.leg2} 第二程）`
-        : '计算最优方案';
+    el.computeBtn.textContent = state.rows.length
+      ? `计算最优方案（${c.direct} 直达 / ${c.leg1}·${c.leg2}·${c.leg3} 分段）`
+      : '计算最优方案';
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 设置与主题
+   * ------------------------------------------------------------------ */
+  const THEME_ORDER = ['auto', 'light', 'dark'];
+  const THEME_ICON = { auto: '🌓', light: '☀️', dark: '🌙' };
+
+  function applyTheme(mode) {
+    const m = THEME_ORDER.includes(mode) ? mode : 'auto';
+    if (m === 'auto') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', m);
+    el.themeBtn.textContent = THEME_ICON[m];
+    el.themeBtn.title = `主题：${m === 'auto' ? '跟随系统' : m === 'light' ? '浅色' : '深色'}（点击切换）`;
+  }
+
+  function cycleTheme() {
+    const cur = state.settings.theme || 'auto';
+    const next = THEME_ORDER[(THEME_ORDER.indexOf(cur) + 1) % THEME_ORDER.length];
+    state.settings = window.KunleStore.saveSettings({ theme: next });
+    applyTheme(next);
+    if (state.chart) state.chart.render();
+  }
+
+  function loadSettingsIntoUI() {
+    const s = state.settings;
+    state.weight = s.weight;
+    el.weightInput.value = String(s.weight);
+    el.weightOut.textContent = `${s.weight}% 省钱`;
+    el.minTransfer.value = String(s.minTransfer);
+    el.maxWait.value = String(s.maxWait);
+    el.hubInput.value = s.hub || '';
+    el.maxLegs.value = String(s.maxLegs || 2);
+
+    const f = s.filters || {};
+    el.fSeat.value = f.seatKeyword || '';
+    el.fDepartFrom.value = f.departFrom || '';
+    el.fDepartTo.value = f.departTo || '';
+    el.fMaxPrice.value = f.maxPrice == null ? '' : f.maxPrice;
+    el.fMaxDuration.value = f.maxDuration == null ? '' : f.maxDuration;
+    el.fMaxTransfers.value = f.maxTransfers == null ? '' : String(f.maxTransfers);
+    el.fExcludeOvernight.checked = Boolean(f.excludeOvernight);
+    el.onlyBuyable.checked = Boolean(f.onlyBuyable);
+    el.onlyDirect.checked = Boolean(f.onlyDirect);
+
+    applyTheme(s.theme || 'auto');
+  }
+
+  function persistSettings(patch) {
+    state.settings = window.KunleStore.saveSettings(patch);
+  }
+
+  function readFilters() {
+    return {
+      onlyBuyable: el.onlyBuyable.checked,
+      onlyDirect: el.onlyDirect.checked,
+      seatKeyword: el.fSeat.value.trim(),
+      departFrom: el.fDepartFrom.value.trim(),
+      departTo: el.fDepartTo.value.trim(),
+      maxPrice: el.fMaxPrice.value === '' ? null : Number(el.fMaxPrice.value),
+      maxDuration: el.fMaxDuration.value === '' ? null : Number(el.fMaxDuration.value),
+      maxTransfers: el.fMaxTransfers.value === '' ? null : Number(el.fMaxTransfers.value),
+      excludeOvernight: el.fExcludeOvernight.checked,
+    };
   }
 
   /* ------------------------------------------------------------------ *
@@ -194,7 +281,7 @@
       const parsed = window.KunleParse.fromOcrLines(data.lines || []);
       if (!parsed.length) {
         setOcrStatus(
-          '没有从这张图里识别出车次。建议：截图时保留「车次 + 时间 + 票价」整行，或直接用「粘贴文本」。',
+          '没有从这张图里识别出车次。建议：截图时保留「车次 + 时间 + 票价」整行，或改用「粘贴文本」。',
           'error'
         );
         return;
@@ -206,7 +293,7 @@
     } catch (err) {
       setOcrStatus(
         `识别失败：${escapeHtml(err.message || err)}<br><span class="muted small">` +
-          'OCR 依赖本机 Node 服务，请确认已运行 <code>node server/server.mjs</code> 并通过 http://127.0.0.1:8787 打开本页面。' +
+          'OCR 依赖本机 Node 服务，请确认已运行 <code>node server/server.mjs</code>。' +
           '</span>',
         'error'
       );
@@ -214,52 +301,122 @@
   }
 
   /* ------------------------------------------------------------------ *
-   * 计算与渲染
+   * 计算
    * ------------------------------------------------------------------ */
   function compute() {
-    const directRows = state.rows.filter((r) => r.group === 'direct');
-    const leg1Rows = state.rows.filter((r) => r.group === 'leg1');
-    const leg2Rows = state.rows.filter((r) => r.group === 'leg2');
-
     if (!state.rows.length) {
-      setStatus('请先录入至少一趟车次（截图识别、粘贴文本或手动添加）。', 'error');
-      return;
-    }
-    if (!directRows.length && !(leg1Rows.length && leg2Rows.length)) {
-      setStatus('需要「直达」车次，或者同时具备「第一程 + 第二程」才能计算中转方案。', 'error');
+      setStatus('请先录入至少一趟车次（截图识别、粘贴文本、导入 CSV 或手动添加）。', 'error');
       return;
     }
 
-    const { options, warnings } = window.KunleAlgo.buildOptions(directRows, leg1Rows, leg2Rows, {
-      hub: el.hubInput.value,
-      minTransfer: Number(el.minTransfer.value),
-      maxWait: Number(el.maxWait.value),
+    const maxLegs = Number(el.maxLegs.value) || 2;
+    const groups = [rowsOf('direct'), rowsOf('leg1'), rowsOf('leg2'), rowsOf('leg3')].slice(
+      0,
+      maxLegs + 1
+    );
+
+    const { options, warnings } = window.KunleAlgo.buildChains(groups, {
+      minTransfer: Number(el.minTransfer.value) || 30,
+      maxWait: Number(el.maxWait.value) || 480,
+      maxLegs,
     });
 
     if (!options.length) {
       setStatus(
-        '没有可计算的方案。请检查：车次的发车/到达时间是否填写、历时是否能推算出来。' +
+        '没有可计算的方案。请检查：发车/到达时间是否填写、历时能否推算，或换乘时间是否放得太宽/太窄。' +
           (warnings.length ? '<br>' + warnings.map(escapeHtml).join('<br>') : ''),
         'error'
       );
       return;
     }
 
+    const hubLabel = el.hubInput.value.trim();
+    if (hubLabel) {
+      for (const o of options) {
+        if (o.transferCount === 1) o.hub = hubLabel;
+      }
+    }
+
     state.options = window.KunleAlgo.score(options, state.weight);
+    state.filtered = window.KunleAlgo.applyFilters(state.options, readFilters());
 
-    const directCount = state.options.filter((o) => o.kind === 'direct').length;
-    const transferCount = state.options.length - directCount;
-    const unknown = state.options.filter((o) => o.price == null).length;
+    renderStats();
+    renderRecommend();
+    renderChart();
+    renderList();
+    renderIssues();
+    renderCompareBar();
 
+    const s = window.KunleAlgo.stats(state.options);
     setStatus(
-      `已计算 ${state.options.length} 个方案（直达 ${directCount} · 中转 ${transferCount}）。` +
-        (unknown ? ` 其中 ${unknown} 个未填票价，不参与「最划算」比较。` : '') +
-        (warnings.length ? `<br><span class="muted small">${warnings.map(escapeHtml).join(' ')}</span>` : '')
+      `已计算 ${s.count} 个方案（直达 ${s.directCount} · 一次中转 ${s.transferCount} · 两次中转 ${s.doubleTransferCount}）。` +
+        (s.unknownPriceCount ? ` 其中 ${s.unknownPriceCount} 个未填票价，不参与比价。` : '') +
+        (warnings.length
+          ? `<br><span class="muted small">${warnings.map(escapeHtml).join(' ')}</span>`
+          : '')
     );
 
-    renderRecommend();
-    renderList();
     el.results.hidden = false;
+    el.statsBar.hidden = false;
+
+    if (state.a11y) {
+      state.a11y.announce(
+        `已生成 ${s.count} 个方案，最低价 ${s.minPrice == null ? '未知' : '¥' + s.minPrice}，最短耗时 ${fmtDur(
+          s.minDuration
+        )}`
+      );
+    }
+
+    persistSettings({
+      weight: state.weight,
+      minTransfer: Number(el.minTransfer.value),
+      maxWait: Number(el.maxWait.value),
+      hub: hubLabel,
+      maxLegs,
+      filters: readFilters(),
+    });
+
+    saveHistorySnapshot();
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 渲染：统计
+   * ------------------------------------------------------------------ */
+  function renderStats() {
+    const s = window.KunleAlgo.stats(state.options);
+    el.stCount.textContent = `${s.count}（含 ${s.paretoCount} 前沿）`;
+    el.stPrice.textContent = s.minPrice == null ? '—' : `${money(s.minPrice)} ~ ${money(s.maxPrice)}`;
+    el.stTime.textContent = s.minDuration == null ? '—' : fmtDur(s.minDuration);
+
+    if (s.savedVsCheapestDirect == null) {
+      el.stSaved.textContent = '—';
+      el.stSaved.className = '';
+    } else if (s.savedVsCheapestDirect > 0.01) {
+      el.stSaved.textContent = `省 ${money(s.savedVsCheapestDirect)}`;
+      el.stSaved.className = 'is-good';
+    } else if (s.savedVsCheapestDirect < -0.01) {
+      el.stSaved.textContent = `贵 ${money(-s.savedVsCheapestDirect)}`;
+      el.stSaved.className = 'is-bad';
+    } else {
+      el.stSaved.textContent = '持平';
+      el.stSaved.className = '';
+    }
+
+    el.stPareto.textContent = s.paretoCount + ' 个';
+    el.statsBar.hidden = false;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 渲染：推荐
+   * ------------------------------------------------------------------ */
+  function routeText(o) {
+    if (o.transferCount === 0) return `${o.fromStation || '?'} → ${o.toStation || '?'}`;
+    const stops = [
+      o.legs[0].from,
+      ...o.legs.slice(0, -1).map((l) => l.to),
+      o.legs[o.legs.length - 1].to,
+    ];
+    return stops.filter(Boolean).join(' → ');
   }
 
   function renderRecommend() {
@@ -269,71 +426,108 @@
       return;
     }
     el.recommendGrid.innerHTML = recs
-      .map(({ card, tag, data, note }) => {
-        const route =
-          data.kind === 'transfer'
-            ? `${escapeHtml(data.legs[0].from)} → ${escapeHtml(data.hub)} → ${escapeHtml(data.legs[1].to)}`
-            : `${escapeHtml(data.fromStation)} → ${escapeHtml(data.toStation)}`;
-        return `<div class="rec-card ${card}">
+      .map(
+        ({ card, tag, data, note }) => `<div class="rec-card ${card}">
           <span class="rec-tag">${escapeHtml(tag)}</span>
-          <div class="rec-main">¥${data.price}<small>${data.kind === 'transfer' ? '两程合计' : ''}</small></div>
-          <div class="rec-sub">${escapeHtml(data.code)} · ${fmtDuration(data.durationMin)} · ${escapeHtml(
+          <div class="rec-main">${money(data.price)}<small>${
+            data.transferCount ? ' 合计' : ''
+          }</small></div>
+          <div class="rec-sub">${escapeHtml(data.code)} · ${fmtDur(data.durationMin)} · ${escapeHtml(
             data.depart
           )} 发车</div>
-          <div class="rec-sub">${route}</div>
+          <div class="rec-sub">${escapeHtml(routeText(data))}</div>
           <div class="rec-sub muted">${escapeHtml(note)}</div>
-        </div>`;
-      })
+        </div>`
+      )
       .join('');
     el.recommend.hidden = false;
   }
 
-  function visibleOptions() {
-    let list = [...state.options];
-    if (state.onlyDirect) list = list.filter((o) => o.kind === 'direct');
-    if (state.onlyBuyable) list = list.filter((o) => o.buyable);
-    return list;
+  /* ------------------------------------------------------------------ *
+   * 渲染：图表
+   * ------------------------------------------------------------------ */
+  function renderChart() {
+    el.chartCard.hidden = false;
+    if (!state.chart) {
+      state.chart = window.KunleChart.createChart(el.chartCanvas, {
+        onSelect: (option) => {
+          state.compare.add(option.key);
+          renderCompareBar();
+          el.chartHint.textContent = `已选中 ${option.code}，可在下方列表中继续勾选对比。`;
+        },
+      });
+    }
+    state.chart.setData(state.filtered.length ? state.filtered : state.options);
+    state.chart.setSelected([...state.compare]);
   }
 
+  /* ------------------------------------------------------------------ *
+   * 渲染：列表
+   * ------------------------------------------------------------------ */
   function sortedOptions(list) {
     const copy = [...list];
     if (state.sort === 'price') copy.sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity));
     else if (state.sort === 'time') copy.sort((a, b) => a.durationMin - b.durationMin);
-    else if (state.sort === 'depart') copy.sort((a, b) => String(a.depart).localeCompare(String(b.depart)));
+    else if (state.sort === 'depart')
+      copy.sort((a, b) => (a.departMin ?? Infinity) - (b.departMin ?? Infinity));
     else copy.sort((a, b) => a.score - b.score);
     return copy;
   }
 
-  function renderItem(o) {
+  function itemHtml(o) {
     const typePill =
-      o.kind === 'transfer'
-        ? `<span class="type-pill is-transfer">中转 · ${escapeHtml(o.hub)}</span>`
-        : `<span class="type-pill">直达</span>`;
-    const paretoPill = o.pareto ? `<span class="pareto-pill">性价比前沿</span>` : '';
-    const legs =
-      o.kind === 'transfer'
-        ? `<ul class="legs">
-            <li>第一程 ${escapeHtml(o.legs[0].code)} ${escapeHtml(o.legs[0].from)} ${escapeHtml(o.legs[0].depart)} → ${escapeHtml(o.legs[0].to)} ${escapeHtml(o.legs[0].arrive)} · ¥${o.legs[0].price ?? '—'}</li>
-            <li class="wait-tip">在 ${escapeHtml(o.hub)} 等待 ${fmtDuration(o.waitMin)}（按你设置的最少换乘时间校验）</li>
-            <li>第二程 ${escapeHtml(o.legs[1].code)} ${escapeHtml(o.legs[1].from)} ${escapeHtml(o.legs[1].depart)} → ${escapeHtml(o.legs[1].to)} ${escapeHtml(o.legs[1].arrive)} · ¥${o.legs[1].price ?? '—'}</li>
-          </ul>`
+      o.transferCount === 0
+        ? '<span class="type-pill">直达</span>'
+        : `<span class="type-pill is-transfer">${
+            o.transferCount === 1 ? '中转' : '两次中转'
+          }${o.hub ? ' · ' + escapeHtml(o.hub) : ''}</span>`;
+    const paretoPill = o.pareto ? '<span class="pareto-pill">性价比前沿</span>' : '';
+    const checked = state.compare.has(o.key) ? 'checked' : '';
+
+    let legs = '';
+    if (o.transferCount > 0) {
+      legs =
+        '<ul class="legs">' +
+        o.legs
+          .map(
+            (l, i) =>
+              `<li>第${i + 1}程 <b>${escapeHtml(l.code)}</b> ${escapeHtml(l.from)} ${escapeHtml(
+                l.depart
+              )} → ${escapeHtml(l.to)} ${escapeHtml(l.arrive)}${
+                l.price != null ? ' · ' + money(l.price) : ''
+              }</li>`
+          )
+          .join('') +
+        o.waits
+          .map((w, i) => `<li class="wait-tip">在第 ${i + 1} 个中转站等待 ${fmtDur(w)}</li>`)
+          .join('') +
+        '</ul>';
+    }
+
+    const seat =
+      o.transferCount === 0 && o.seatText
+        ? `<div class="seats"><span class="seat-chip">${escapeHtml(o.seatText)}</span></div>`
         : '';
-    const seat = o.kind === 'direct' && o.seatText ? `<div class="seats"><span class="seat-chip">${escapeHtml(o.seatText)}</span></div>` : '';
+
     const priceHtml =
       o.price == null
-        ? `<div class="price is-unknown">未填票价</div>`
-        : `<div class="price">¥${o.price}<small>${o.kind === 'transfer' ? ' 合计' : ''}</small></div>`;
+        ? '<div class="price is-unknown">未填票价</div>'
+        : `<div class="price">${money(o.price)}<small>${o.transferCount ? ' 合计' : ''}</small></div>`;
 
-    return `<article class="item ${o.pareto ? 'is-pareto' : ''}">
+    return `<article class="item ${o.pareto ? 'is-pareto' : ''}" id="opt-${escapeHtml(o.key)}">
       <div>
         <div class="item-head">
           <span class="train-code">${escapeHtml(o.code)}</span>
           ${typePill}${paretoPill}
+          <label class="item-compare">
+            <input type="checkbox" data-compare="${escapeHtml(o.key)}" ${checked} />
+            加入对比
+          </label>
         </div>
         <div class="timeline">
           <span class="tm">${escapeHtml(o.depart)}</span>
           <span class="st">${escapeHtml(o.fromStation)}</span>
-          <span class="arrow">──${fmtDuration(o.durationMin)}──▶</span>
+          <span class="arrow">──${fmtDur(o.durationMin)}──▶</span>
           <span class="tm">${escapeHtml(o.arrive)}</span>
           <span class="st">${escapeHtml(o.toStation)}</span>
         </div>
@@ -344,34 +538,370 @@
   }
 
   function renderList() {
-    const list = sortedOptions(visibleOptions());
-    const directCount = state.options.filter((o) => o.kind === 'direct').length;
-    el.countInfo.textContent = `共 ${state.options.length} 个方案（直达 ${directCount} · 中转 ${
-      state.options.length - directCount
-    }）`;
+    const list = sortedOptions(state.filtered);
+    el.countInfo.textContent = `显示 ${list.length} / 共 ${state.options.length} 个方案 · 排序：${
+      SORT_LABEL[state.sort]
+    }`;
     el.list.innerHTML = list.length
-      ? list.map(renderItem).join('')
-      : '<p class="muted">当前筛选下没有方案。</p>';
+      ? list.map(itemHtml).join('')
+      : '<p class="muted">当前筛选条件下没有方案，试试放宽条件或重置筛选。</p>';
   }
 
   /* ------------------------------------------------------------------ *
-   * 示例数据（纯本地，便于快速体验）
+   * 行程详情（时间轴）
+   * ------------------------------------------------------------------ */
+  function renderDetail(option) {
+    if (!option) return;
+    el.detailTitle.textContent = `${option.code} 行程详情`;
+    el.detailCard.hidden = false;
+
+    if (window.KunleTimeline) {
+      window.KunleTimeline.render(el.detailTimeline, option);
+    }
+
+    const rows = [];
+    rows.push(['路线', escapeHtml(routeText(option))]);
+    rows.push(['时刻', `${escapeHtml(option.depart)} → ${escapeHtml(option.arrive)}`]);
+    rows.push(['总耗时', fmtDur(option.durationMin)]);
+    rows.push(['总价', money(option.price)]);
+    rows.push([
+      '中转',
+      option.transferCount === 0
+        ? '直达'
+        : `${option.transferCount} 次（等待 ${fmtDur(option.waitMin)}）`,
+    ]);
+    if (option.seatText) rows.push(['席别余票', escapeHtml(option.seatText)]);
+    if (option.pareto) rows.push(['性价比', '位于前沿（没有被更便宜又更快的方案压制）']);
+
+    const legsHtml =
+      option.legs && option.legs.length > 1
+        ? `<div class="detail-row"><span class="k">分段</span><span class="v"><ul class="detail-legs">${option.legs
+            .map(
+              (l, i) =>
+                `<li>${i + 1}. ${escapeHtml(l.code)} ${escapeHtml(l.from)} ${escapeHtml(
+                  l.depart
+                )} → ${escapeHtml(l.to)} ${escapeHtml(l.arrive)} · ${money(l.price)}</li>`
+            )
+            .join('')}</ul></span></div>`
+        : '';
+
+    el.detailBody.innerHTML =
+      rows
+        .map(([k, v]) => `<div class="detail-row"><span class="k">${k}</span><span class="v">${v}</span></div>`)
+        .join('') + legsHtml;
+
+    if (state.a11y) state.a11y.announce(`已展开 ${option.code} 的行程详情`);
+  }
+
+
+  function renderIssues() {
+    if (!window.KunleValidate) return;
+    const { issues, summary, hasBlocking } = window.KunleValidate.validateRows(state.rows, {
+      hub: el.hubInput.value,
+    });
+
+    if (!issues.length) {
+      el.issuesCard.hidden = true;
+      return;
+    }
+    el.issuesCard.hidden = false;
+    el.issuesSummary.textContent = `${hasBlocking ? '存在阻断问题 · ' : ''}错误 ${summary.error} · 警告 ${
+      summary.warn
+    } · 提示 ${summary.info}`;
+
+    const icon = { error: '✕', warn: '!', info: 'i' };
+    const label = { error: '错误', warn: '警告', info: '提示' };
+    el.issuesList.innerHTML = issues
+      .slice(0, 40)
+      .map(
+        (i) => `<li class="lv-${i.level}">
+          <span class="lv-tag">${icon[i.level]} ${label[i.level]}</span>
+          <span>${escapeHtml(i.message)}</span>
+        </li>`
+      )
+      .join('');
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 报告导出
+   * ------------------------------------------------------------------ */
+  function reportContext() {
+    return {
+      weight: state.weight,
+      minTransfer: Number(el.minTransfer.value),
+      maxWait: Number(el.maxWait.value),
+      maxLegs: Number(el.maxLegs.value),
+      hub: el.hubInput.value.trim(),
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  function exportReport(format) {
+    if (!state.options.length) {
+      setStatus('请先计算方案再导出报告。', 'error');
+      return;
+    }
+    const ctx = reportContext();
+    const list = sortedOptions(state.filtered.length ? state.filtered : state.options);
+
+    if (format === 'md') {
+      const md = window.KunleReport.markdown(list, ctx);
+      download(window.KunleReport.fileName('md'), md, 'text/markdown;charset=utf-8');
+    } else {
+      const page = window.KunleReport.html(list, ctx);
+      download(window.KunleReport.fileName('html'), page, 'text/html;charset=utf-8');
+    }
+    setStatus(`已导出${format === 'md' ? ' Markdown ' : ' HTML '}报告，可在浏览器或编辑器中打开。`);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 方案对比
+   * ------------------------------------------------------------------ */
+  function selectedOptions() {
+    return state.options.filter((o) => state.compare.has(o.key));
+  }
+
+  function renderCompareBar() {
+    el.compareBar.hidden = state.compare.size === 0;
+    el.compareCount.textContent = String(state.compare.size);
+    if (state.chart) state.chart.setSelected([...state.compare]);
+  }
+
+  function renderCompareTable() {
+    const list = selectedOptions();
+    if (!list.length) {
+      el.compareTable.innerHTML = '<tr><td class="muted">还没有选中方案</td></tr>';
+      return;
+    }
+
+    const priced = list.filter((o) => o.price != null);
+    const minPrice = priced.length ? Math.min(...priced.map((o) => o.price)) : null;
+    const minDur = Math.min(...list.map((o) => o.durationMin));
+
+    const rows = [
+      {
+        label: '方案',
+        value: (o) =>
+          `<b>${escapeHtml(o.code)}</b><br><span class="muted small">${escapeHtml(routeText(o))}</span>`,
+      },
+      { label: '总价', value: (o) => money(o.price), best: (o) => o.price != null && o.price === minPrice },
+      { label: '总耗时', value: (o) => fmtDur(o.durationMin), best: (o) => o.durationMin === minDur },
+      { label: '发车 → 到达', value: (o) => `${escapeHtml(o.depart)} → ${escapeHtml(o.arrive)}` },
+      { label: '中转次数', value: (o) => (o.transferCount === 0 ? '直达' : o.transferCount + ' 次') },
+      { label: '换乘等待', value: (o) => (o.transferCount ? fmtDur(o.waitMin) : '—') },
+      { label: '性价比前沿', value: (o) => (o.pareto ? '<span class="pareto-pill">是</span>' : '否') },
+      { label: '有票', value: (o) => (o.buyable ? '是' : '否') },
+      { label: '综合分', value: (o) => o.score.toFixed(3) },
+    ];
+
+    const head =
+      '<tr><th>比较项</th>' + list.map((o, i) => `<th>方案 ${i + 1}</th>`).join('') + '</tr>';
+
+    const body = rows
+      .map(
+        (row) =>
+          `<tr><th>${row.label}</th>` +
+          list
+            .map((o) => `<td class="${row.best && row.best(o) ? 'best' : ''}">${row.value(o)}</td>`)
+            .join('') +
+          '</tr>'
+      )
+      .join('');
+
+    el.compareTable.innerHTML = head + body;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 历史记录
+   * ------------------------------------------------------------------ */
+  function saveHistorySnapshot() {
+    const s = window.KunleAlgo.stats(state.options);
+    const plainRows = state.rows.map((r) => ({
+      code: r.code,
+      fromStation: r.fromStation,
+      toStation: r.toStation,
+      depart: r.depart,
+      arrive: r.arrive,
+      durationMin: r.durationMin,
+      price: r.price,
+      seatText: r.seatText,
+      seatAvailable: r.seatAvailable,
+      group: r.group,
+    }));
+    window.KunleStore.saveSnapshot({
+      rows: plainRows,
+      hub: el.hubInput.value,
+      weight: state.weight,
+      minTransfer: Number(el.minTransfer.value),
+      maxWait: Number(el.maxWait.value),
+      maxLegs: Number(el.maxLegs.value),
+      summary: { options: s.count, minPrice: s.minPrice, minDuration: s.minDuration },
+    });
+    renderHistory();
+  }
+
+  function renderHistory() {
+    const list = window.KunleStore.loadHistory();
+    state.history = list;
+    el.historyCard.hidden = list.length === 0;
+    el.historyList.innerHTML = list
+      .map((h) => {
+        const time = new Date(h.createdAt).toLocaleString('zh-CN');
+        const sum = h.summary || {};
+        return `<div class="history-item">
+          <span class="h-time">${escapeHtml(time)}</span>
+          <span class="h-sum">
+            ${h.rows.length} 条车次 · ${sum.options || 0} 个方案 · 最低 ${
+              sum.minPrice == null ? '—' : money(sum.minPrice)
+            }${h.hub ? ' · 中转 ' + escapeHtml(h.hub) : ''}
+          </span>
+          <span class="h-actions">
+            <button class="btn btn-mini" data-restore="${h.id}" type="button">回填</button>
+            <button class="btn btn-mini btn-danger" data-remove="${h.id}" type="button">删除</button>
+          </span>
+        </div>`;
+      })
+      .join('');
+  }
+
+  function restoreSnapshot(id) {
+    const h = window.KunleStore.loadHistory().find((x) => x.id === id);
+    if (!h) return;
+    state.rows = [];
+    seq = 0;
+    for (const r of h.rows) state.rows.push(makeRow(r, r.group));
+    el.hubInput.value = h.hub || '';
+    if (h.weight != null) {
+      state.weight = h.weight;
+      el.weightInput.value = String(h.weight);
+      el.weightOut.textContent = `${h.weight}% 省钱`;
+    }
+    if (h.minTransfer != null) el.minTransfer.value = String(h.minTransfer);
+    if (h.maxWait != null) el.maxWait.value = String(h.maxWait);
+    if (h.maxLegs != null) el.maxLegs.value = String(h.maxLegs);
+    renderTable();
+    setStatus('已回填一条历史记录，点「计算最优方案」重新计算。');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * CSV
+   * ------------------------------------------------------------------ */
+  function exportCsv() {
+    if (!state.rows.length) {
+      setOcrStatus('还没有数据可导出。', 'error');
+      return;
+    }
+    const csv = window.KunleParse.toCSV(state.rows);
+    download(
+      `kunle-车次-${new Date().toISOString().slice(0, 10)}.csv`,
+      '\uFEFF' + csv,
+      'text/csv;charset=utf-8'
+    );
+    setOcrStatus(`已导出 ${state.rows.length} 行车次（含 UTF-8 BOM，Excel 可直接打开）。`);
+  }
+
+  async function importCsv(file) {
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const rows = window.KunleParse.fromCSV(text);
+      if (!rows.length) {
+        setOcrStatus('CSV 里没有解析出车次，请确认至少包含「车次」列。', 'error');
+        return;
+      }
+      const n = addParsed(rows, 'direct');
+      setOcrStatus(`CSV 导入完成：新增 ${n} 行。`);
+    } catch (err) {
+      setOcrStatus('CSV 导入失败：' + escapeHtml(err.message || err), 'error');
+    }
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 打印
+   * ------------------------------------------------------------------ */
+  function buildPrintArea() {
+    const s = window.KunleAlgo.stats(state.options);
+    const recs = window.KunleAlgo.recommend(state.options, state.weight);
+    const top = sortedOptions(state.filtered).slice(0, 20);
+
+    const recHtml = recs
+      .map(
+        (r) =>
+          `<div class="p-rec"><b>${escapeHtml(r.tag)}</b><br>
+            ${escapeHtml(r.data.code)} · ${money(r.data.price)} · ${fmtDur(r.data.durationMin)}<br>
+            ${escapeHtml(routeText(r.data))} · ${escapeHtml(r.data.depart)} 发车</div>`
+      )
+      .join('');
+
+    const tableRows = top
+      .map(
+        (o, i) => `<tr>
+          <td>${i + 1}</td>
+          <td>${escapeHtml(o.code)}</td>
+          <td>${escapeHtml(routeText(o))}</td>
+          <td>${escapeHtml(o.depart)} → ${escapeHtml(o.arrive)}</td>
+          <td>${fmtDur(o.durationMin)}</td>
+          <td>${o.transferCount === 0 ? '直达' : o.transferCount + ' 次'}</td>
+          <td>${money(o.price)}</td>
+          <td>${o.pareto ? '★' : ''}</td>
+        </tr>`
+      )
+      .join('');
+
+    el.printArea.innerHTML = `
+      <h1>车票最优方案单</h1>
+      <div class="p-meta">
+        生成时间：${new Date().toLocaleString('zh-CN')} ｜
+        参数：权重 ${state.weight}% 省钱 · 最少换乘 ${el.minTransfer.value} 分钟 · 最多 ${el.maxLegs.value} 段
+      </div>
+      ${recHtml}
+      <div class="p-meta">
+        共 ${s.count} 个方案（直达 ${s.directCount}、一次中转 ${s.transferCount}、两次中转 ${s.doubleTransferCount}），
+        价格 ${s.minPrice == null ? '—' : money(s.minPrice) + ' ~ ' + money(s.maxPrice)}，
+        最短耗时 ${fmtDur(s.minDuration)}。下表列出前 ${top.length} 个。
+      </div>
+      <table>
+        <thead>
+          <tr><th>#</th><th>车次</th><th>路线</th><th>时间</th><th>耗时</th><th>中转</th><th>票价</th><th>前沿</th></tr>
+        </thead>
+        <tbody>${tableRows}</tbody>
+      </table>
+      <div class="p-meta">票价与余票请以 12306 官方页面为准。</div>
+    `;
+  }
+
+  function doPrint() {
+    if (!state.options.length) {
+      setStatus('请先计算方案再打印。', 'error');
+      return;
+    }
+    buildPrintArea();
+    window.print();
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 示例数据
    * ------------------------------------------------------------------ */
   const DEMO = {
     direct: [
-      { code: 'G1', fromStation: '北京南', toStation: '上海虹桥', depart: '06:30', arrive: '11:24', durationMin: 294, price: 598, seat: { name: '二等座', text: '有', available: true } },
-      { code: 'G3', fromStation: '北京南', toStation: '上海虹桥', depart: '07:00', arrive: '11:41', durationMin: 281, price: 667, seat: { name: '二等座', text: '有', available: true } },
-      { code: 'G531', fromStation: '北京南', toStation: '上海虹桥', depart: '06:08', arrive: '12:04', durationMin: 356, price: 498, seat: { name: '二等座', text: '2', available: true } },
-      { code: 'D709', fromStation: '北京南', toStation: '上海虹桥', depart: '19:46', arrive: '07:45', durationMin: 719, price: 296, seat: { name: '二等座', text: '有', available: true } },
-      { code: '1461', fromStation: '北京', toStation: '上海', depart: '11:59', arrive: '06:45', durationMin: 1126, price: 156.5, seat: { name: '硬座', text: '有', available: true } },
+      { code: 'G1', fromStation: '北京南', toStation: '上海虹桥', depart: '06:30', arrive: '11:24', durationMin: 294, price: 598, seat: { name: '二等座', text: '有' } },
+      { code: 'G3', fromStation: '北京南', toStation: '上海虹桥', depart: '07:00', arrive: '11:41', durationMin: 281, price: 667, seat: { name: '二等座', text: '有' } },
+      { code: 'G531', fromStation: '北京南', toStation: '上海虹桥', depart: '06:08', arrive: '12:04', durationMin: 356, price: 498, seat: { name: '二等座', text: '2' } },
+      { code: 'D709', fromStation: '北京南', toStation: '上海虹桥', depart: '19:46', arrive: '07:45', durationMin: 719, price: 296, seat: { name: '二等座', text: '有' } },
+      { code: '1461', fromStation: '北京', toStation: '上海', depart: '11:59', arrive: '06:45', durationMin: 1126, price: 156.5, seat: { name: '硬座', text: '有' } },
     ],
     leg1: [
-      { code: 'G49', fromStation: '北京南', toStation: '南京南', depart: '19:04', arrive: '22:18', durationMin: 194, price: 445, seat: { name: '二等座', text: '有', available: true } },
-      { code: 'G33', fromStation: '北京南', toStation: '南京南', depart: '19:00', arrive: '22:14', durationMin: 194, price: 445, seat: { name: '二等座', text: '有', available: true } },
+      { code: 'G801', fromStation: '北京南', toStation: '郑州东', depart: '07:00', arrive: '09:30', durationMin: 150, price: 309, seat: { name: '二等座', text: '有' } },
+      { code: 'G803', fromStation: '北京南', toStation: '郑州东', depart: '08:00', arrive: '10:40', durationMin: 160, price: 309, seat: { name: '二等座', text: '有' } },
     ],
     leg2: [
-      { code: 'G35', fromStation: '南京南', toStation: '上海虹桥', depart: '22:51', arrive: '23:51', durationMin: 60, price: 146, seat: { name: '二等座', text: '有', available: true } },
-      { code: 'G459', fromStation: '南京南', toStation: '上海虹桥', depart: '18:51', arrive: '19:54', durationMin: 63, price: 146, seat: { name: '二等座', text: '有', available: true } },
+      { code: 'G1801', fromStation: '郑州东', toStation: '南京南', depart: '11:10', arrive: '15:00', durationMin: 230, price: 230, seat: { name: '二等座', text: '有' } },
+      { code: 'G1803', fromStation: '郑州东', toStation: '南京南', depart: '12:20', arrive: '16:10', durationMin: 230, price: 230, seat: { name: '二等座', text: '有' } },
+    ],
+    leg3: [
+      { code: 'G35', fromStation: '南京南', toStation: '上海虹桥', depart: '17:00', arrive: '18:00', durationMin: 60, price: 146, seat: { name: '二等座', text: '有' } },
+      { code: 'G459', fromStation: '南京南', toStation: '上海虹桥', depart: '18:30', arrive: '19:34', durationMin: 64, price: 146, seat: { name: '二等座', text: '有' } },
     ],
   };
 
@@ -380,20 +910,19 @@
     for (const [group, list] of Object.entries(DEMO)) {
       for (const item of list) state.rows.push(makeRow(item, group));
     }
-    el.hubInput.value = '南京';
+    el.hubInput.value = '郑州 / 南京';
+    el.maxLegs.value = '3';
     renderTable();
-    setOcrStatus('已载入示例数据：5 趟直达 + 2×2 组合的中转车次。点「计算最优方案」查看结果。');
+    setOcrStatus(
+      '已载入示例：5 趟直达 + 郑州、南京两处中转车次。点「计算最优方案」查看直达 / 一次中转 / 两次中转的对比。'
+    );
   }
 
   /* ------------------------------------------------------------------ *
-   * 事件
+   * 事件绑定
    * ------------------------------------------------------------------ */
-  function readFileAsImage(file) {
-    return file;
-  }
-
   function bind() {
-    // 表格编辑：直接写回 state，不重渲染（避免输入时丢焦点）
+    /* --- 表格编辑 --- */
     el.rowsBody.addEventListener('input', (e) => {
       const input = e.target;
       const tr = input.closest('tr');
@@ -401,15 +930,13 @@
       const row = state.rows.find((r) => r.id === tr.dataset.id);
       if (!row) return;
       const field = input.dataset.field;
-      if (!field) return;
-      row[field] = input.value;
+      if (field) row[field] = input.value;
     });
 
     el.rowsBody.addEventListener('change', (e) => {
       const sel = e.target.closest('select[data-field="group"]');
       if (!sel) return;
-      const tr = sel.closest('tr');
-      const row = state.rows.find((r) => r.id === tr.dataset.id);
+      const row = state.rows.find((r) => r.id === sel.closest('tr').dataset.id);
       if (row) row.group = sel.value;
       updateCounts();
     });
@@ -421,7 +948,6 @@
       renderTable();
     });
 
-    // 批量分组
     document.querySelectorAll('[data-group]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const g = btn.dataset.group;
@@ -438,16 +964,21 @@
     el.clearBtn.addEventListener('click', () => {
       state.rows = [];
       state.options = [];
+      state.filtered = [];
+      state.compare.clear();
       renderTable();
       el.results.hidden = true;
       el.recommend.hidden = true;
+      el.statsBar.hidden = true;
+      el.chartCard.hidden = true;
       setStatus('');
       setOcrStatus('');
+      renderCompareBar();
     });
 
     el.demoBtn.addEventListener('click', loadDemo);
 
-    // 截图：点击 / 拖拽 / 选择文件
+    /* --- 截图 --- */
     el.dropzone.addEventListener('click', () => el.fileInput.click());
     el.dropzone.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') {
@@ -471,7 +1002,6 @@
       if (f) ocrImage(f);
     });
 
-    // 全局粘贴图片
     document.addEventListener('paste', (e) => {
       const items = e.clipboardData && e.clipboardData.items;
       if (!items) return;
@@ -487,7 +1017,7 @@
       }
     });
 
-    // 文本解析
+    /* --- 文本 / CSV --- */
     el.parseTextBtn.addEventListener('click', () => {
       const text = el.pasteArea.value;
       if (!text.trim()) {
@@ -496,7 +1026,7 @@
       }
       const parsed = window.KunleParse.fromText(text);
       if (!parsed.length) {
-        setOcrStatus('没解析出车次。每行至少需要包含车次号，例如：G1 北京南 上海虹桥 06:30 11:24 ¥598', 'error');
+        setOcrStatus('没解析出车次。每行至少包含车次号，例如：G1 北京南 上海虹桥 06:30 11:24 ¥598', 'error');
         return;
       }
       const n = addParsed(parsed, 'direct');
@@ -504,35 +1034,182 @@
       el.pasteArea.value = '';
     });
 
-    // 权重
-    el.weight.addEventListener('input', () => {
-      state.weight = Number(el.weight.value);
+    el.csvImportBtn.addEventListener('click', () => el.csvFileInput.click());
+    el.csvFileInput.addEventListener('change', () => {
+      if (el.csvFileInput.files && el.csvFileInput.files[0]) importCsv(el.csvFileInput.files[0]);
+      el.csvFileInput.value = '';
+    });
+    el.csvExportBtn.addEventListener('click', exportCsv);
+
+    /* --- 参数 --- */
+    el.weightInput.addEventListener('input', () => {
+      state.weight = Number(el.weightInput.value);
       el.weightOut.textContent = `${state.weight}% 省钱`;
       if (state.options.length) {
         window.KunleAlgo.score(state.options, state.weight);
+        state.filtered = window.KunleAlgo.applyFilters(state.options, readFilters());
+        renderStats();
         renderRecommend();
+        renderChart();
         renderList();
       }
+      persistSettings({ weight: state.weight });
     });
 
     el.computeBtn.addEventListener('click', compute);
 
-    el.tabs.addEventListener('click', (e) => {
-      const btn = e.target.closest('.tab');
-      if (!btn) return;
-      [...el.tabs.children].forEach((b) => b.classList.toggle('is-active', b === btn));
-      state.sort = btn.dataset.sort;
-      if (state.options.length) renderList();
+    [el.minTransfer, el.maxWait, el.maxLegs].forEach((input) => {
+      input.addEventListener('change', () => {
+        persistSettings({
+          minTransfer: Number(el.minTransfer.value),
+          maxWait: Number(el.maxWait.value),
+          maxLegs: Number(el.maxLegs.value),
+        });
+      });
     });
 
-    el.onlyBuyable.addEventListener('change', () => {
-      state.onlyBuyable = el.onlyBuyable.checked;
-      if (state.options.length) renderList();
+    el.hubInput.addEventListener('change', () => persistSettings({ hub: el.hubInput.value }));
+
+    /* --- 筛选 --- */
+    const onFilter = () => {
+      persistSettings({ filters: readFilters() });
+      if (state.options.length) {
+        state.filtered = window.KunleAlgo.applyFilters(state.options, readFilters());
+        renderChart();
+        renderList();
+      }
+    };
+    [el.fSeat, el.fDepartFrom, el.fDepartTo, el.fMaxPrice, el.fMaxDuration, el.fMaxTransfers].forEach(
+      (input) => input.addEventListener('change', onFilter)
+    );
+    el.fExcludeOvernight.addEventListener('change', onFilter);
+    el.onlyBuyable.addEventListener('change', onFilter);
+    el.onlyDirect.addEventListener('change', onFilter);
+
+    el.resetFiltersBtn.addEventListener('click', () => {
+      el.fSeat.value = '';
+      el.fDepartFrom.value = '';
+      el.fDepartTo.value = '';
+      el.fMaxPrice.value = '';
+      el.fMaxDuration.value = '';
+      el.fMaxTransfers.value = '';
+      el.fExcludeOvernight.checked = false;
+      el.onlyBuyable.checked = false;
+      el.onlyDirect.checked = false;
+      onFilter();
     });
-    el.onlyDirect.addEventListener('change', () => {
-      state.onlyDirect = el.onlyDirect.checked;
-      if (state.options.length) renderList();
+
+    el.filterToggle.addEventListener('click', () => {
+      const collapsed = el.filterPanel.classList.toggle('is-collapsed');
+      el.filterToggle.textContent = collapsed ? '展开' : '收起';
     });
+
+    /* --- 排序 --- */
+    el.sortTabs.addEventListener('click', (e) => {
+      const btn = e.target.closest('.tab');
+      if (!btn) return;
+      setSort(btn.dataset.sort);
+    });
+
+    /* --- 对比 --- */
+    el.list.addEventListener('change', (e) => {
+      const cb = e.target.closest('[data-compare]');
+      if (!cb) return;
+      const key = cb.dataset.compare;
+      if (cb.checked) state.compare.add(key);
+      else state.compare.delete(key);
+      renderCompareBar();
+    });
+
+    el.compareOpen.addEventListener('click', () => {
+      renderCompareTable();
+      el.compareModal.hidden = false;
+      if (state.a11y) state.a11y.trapFocus(el.compareModal);
+    });
+    el.compareClose.addEventListener('click', () => {
+      el.compareModal.hidden = true;
+      if (state.a11y) state.a11y.releaseFocus();
+    });
+    el.compareModal.addEventListener('click', (e) => {
+      if (e.target === el.compareModal) {
+        el.compareModal.hidden = true;
+        if (state.a11y) state.a11y.releaseFocus();
+      }
+    });
+    el.compareClear.addEventListener('click', () => {
+      state.compare.clear();
+      renderCompareBar();
+      el.list.querySelectorAll('[data-compare]').forEach((cb) => (cb.checked = false));
+    });
+
+    /* --- 行程详情 --- */
+    el.list.addEventListener('click', (e) => {
+      if (e.target.closest('.item-compare')) return;
+      const article = e.target.closest('.item');
+      if (!article) return;
+      const option = state.options.find((o) => 'opt-' + o.key === article.id);
+      if (option) renderDetail(option);
+    });
+    el.detailClose.addEventListener('click', () => {
+      el.detailCard.hidden = true;
+    });
+
+    /* --- 历史 --- */
+    el.historyList.addEventListener('click', (e) => {
+      const restore = e.target.closest('[data-restore]');
+      if (restore) return restoreSnapshot(restore.dataset.restore);
+      const remove = e.target.closest('[data-remove]');
+      if (remove) {
+        window.KunleStore.removeSnapshot(remove.dataset.remove);
+        renderHistory();
+      }
+    });
+    el.historyClear.addEventListener('click', () => {
+      window.KunleStore.clearHistory();
+      renderHistory();
+    });
+
+    /* --- 主题 / 打印 --- */
+    el.themeBtn.addEventListener('click', cycleTheme);
+    el.printBtn.addEventListener('click', doPrint);
+
+    /* --- 报告导出 --- */
+    el.exportMdBtn.addEventListener('click', () => exportReport('md'));
+    el.exportHtmlBtn.addEventListener('click', () => exportReport('html'));
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 排序与无障碍
+   * ------------------------------------------------------------------ */
+  function setSort(key) {
+    const btn = [...el.sortTabs.children].find((b) => b.dataset.sort === key);
+    if (!btn) return;
+    [...el.sortTabs.children].forEach((b) => b.classList.toggle('is-active', b === btn));
+    state.sort = key;
+    if (state.options.length) renderList();
+  }
+
+  function initA11y() {
+    if (!window.KunleA11y) return;
+    state.a11y = window.KunleA11y.init({
+      shortcuts: {
+        'ctrl+enter': () => compute(),
+        'ctrl+e': () => exportReport('md'),
+        'ctrl+p': () => doPrint(),
+        'alt+1': () => setSort('score'),
+        'alt+2': () => setSort('price'),
+        'alt+3': () => setSort('time'),
+        'alt+4': () => setSort('depart'),
+        'alt+d': () => loadDemo(),
+      },
+      onEscape: () => {
+        if (!el.compareModal.hidden) {
+          el.compareModal.hidden = true;
+          if (state.a11y) state.a11y.releaseFocus();
+        }
+      },
+    });
+    state.a11y.initTabs(el.sortTabs);
   }
 
   /* ------------------------------------------------------------------ *
@@ -555,16 +1232,29 @@
     }
   }
 
-  function boot() {
-    bind();
-    el.weightOut.textContent = `${state.weight}% 省钱`;
-    updateCounts();
-    checkEngine();
-    el.buildInfo.textContent = document.lastModified
-      ? `页面更新：${new Date(document.lastModified).toLocaleString('zh-CN')}`
-      : '';
+  function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) return;
+    if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
+    navigator.serviceWorker.register('sw.js').catch(() => {
+      /* 离线缓存失败不影响主流程 */
+    });
+  }
 
-    if (new URLSearchParams(location.search).get('demo') === '1') {
+  function boot() {
+    cacheElements();
+    state.settings = window.KunleStore.loadSettings();
+    loadSettingsIntoUI();
+    bind();
+    initA11y();
+    renderTable();
+    renderHistory();
+    checkEngine();
+    registerServiceWorker();
+
+    el.buildInfo.textContent = `最后更新：${new Date(document.lastModified).toLocaleString('zh-CN')}`;
+
+    const params = new URLSearchParams(location.search);
+    if (params.get('demo') === '1') {
       loadDemo();
       setTimeout(compute, 80);
     }

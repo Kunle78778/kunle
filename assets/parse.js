@@ -235,6 +235,149 @@
     return rows;
   }
 
+  /* ------------------------------------------------------------------ *
+   * CSV 导入 / 导出
+   * ------------------------------------------------------------------ */
+
+  const CSV_HEADER = ['车次', '出发站', '到达站', '发车', '到达', '历时(分)', '票价', '余票', '分组'];
+
+  /** CSV 字段转义：含逗号、引号、换行时用双引号包裹 */
+  function csvEscape(value) {
+    const s = String(value == null ? '' : value);
+    if (/[",\r\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  }
+
+  /**
+   * 行数据 → CSV 文本
+   * @param {object[]} rows
+   */
+  function toCSV(rows) {
+    const lines = [CSV_HEADER.join(',')];
+    for (const r of rows || []) {
+      lines.push(
+        [
+          r.code || '',
+          r.fromStation || '',
+          r.toStation || '',
+          r.depart || '',
+          r.arrive || '',
+          r.durationMin == null ? '' : r.durationMin,
+          r.price == null ? '' : r.price,
+          r.seatText || '',
+          r.group || 'direct',
+        ]
+          .map(csvEscape)
+          .join(',')
+      );
+    }
+    return lines.join('\r\n') + '\r\n';
+  }
+
+  /** 极简 CSV 行解析：支持引号包裹与转义双引号 */
+  function splitCsvLine(line) {
+    const out = [];
+    let cur = '';
+    let quoted = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (quoted) {
+        if (ch === '"') {
+          if (line[i + 1] === '"') {
+            cur += '"';
+            i++;
+          } else {
+            quoted = false;
+          }
+        } else {
+          cur += ch;
+        }
+      } else if (ch === '"') {
+        quoted = true;
+      } else if (ch === ',') {
+        out.push(cur);
+        cur = '';
+      } else {
+        cur += ch;
+      }
+    }
+    out.push(cur);
+    return out;
+  }
+
+  /** 表头 → 字段名映射（兼容中英文表头） */
+  const HEADER_ALIASES = {
+    code: ['车次', '车次号', 'train', 'code', 'trainno'],
+    fromStation: ['出发站', '出发', '始发站', 'from', 'fromstation'],
+    toStation: ['到达站', '到达', '终到站', 'to', 'tostation'],
+    depart: ['发车', '发车时间', '出发时间', 'depart', 'start'],
+    arrive: ['到达时间', 'arrive', 'end'],
+    durationMin: ['历时(分)', '历时', '耗时', 'duration', 'minutes'],
+    price: ['票价', '价格', 'price', 'fare'],
+    seatText: ['余票', '席别', '座位', 'seat', 'tickets'],
+    group: ['分组', 'group', 'type'],
+  };
+
+  function mapHeader(cell) {
+    const key = String(cell || '').trim().toLowerCase();
+    for (const [field, aliases] of Object.entries(HEADER_ALIASES)) {
+      if (aliases.some((a) => a.toLowerCase() === key)) return field;
+    }
+    return null;
+  }
+
+  /**
+   * CSV 文本 → 行数据
+   * 有表头时按表头映射；没有表头时退化为「按字段顺序猜测」
+   * @param {string} text
+   * @param {string} group 默认分组
+   */
+  function fromCSV(text, group) {
+    const lines = String(text || '')
+      .split(/\r?\n/)
+      .filter((l) => l.trim() !== '');
+    if (!lines.length) return [];
+
+    const firstCells = splitCsvLine(lines[0]);
+    const mapped = firstCells.map(mapHeader);
+    const hasHeader = mapped.filter(Boolean).length >= 3;
+
+    const rows = [];
+    const body = hasHeader ? lines.slice(1) : lines;
+
+    for (const line of body) {
+      const cells = splitCsvLine(line);
+      if (hasHeader) {
+        const row = {
+          code: '',
+          fromStation: '',
+          toStation: '',
+          depart: '',
+          arrive: '',
+          durationMin: null,
+          price: null,
+          seatText: '',
+          group: group || 'direct',
+        };
+        cells.forEach((cell, i) => {
+          const field = mapped[i];
+          if (!field) return;
+          if (field === 'durationMin') row.durationMin = Number(cell) || null;
+          else if (field === 'price') row.price = cell === '' ? null : Number(cell);
+          else row[field] = cell.trim();
+        });
+        if (row.code) rows.push(row);
+      } else {
+        const parsed = extractRow(cells);
+        if (parsed) {
+          parsed.group = group || 'direct';
+          rows.push(parsed);
+        }
+      }
+    }
+    return rows;
+  }
+
   /** 生成给表格用的初始行 */
   function blankRow() {
     return {
@@ -261,5 +404,11 @@
     toMinutes,
     parseTime,
     parsePrice,
+    // CSV
+    CSV_HEADER,
+    csvEscape,
+    toCSV,
+    splitCsvLine,
+    fromCSV,
   };
 });
