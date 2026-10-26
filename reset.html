@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>清理缓存 · 车票最优助手</title>
+<style>
+  body {
+    margin: 0; min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #1e3a8a, #2563eb 45%, #7c3aed);
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    color: #fff; padding: 24px;
+  }
+  .box {
+    background: rgba(255,255,255,.12);
+    border: 1px solid rgba(255,255,255,.25);
+    border-radius: 16px; padding: 28px 32px;
+    max-width: 520px; width: 100%;
+    backdrop-filter: blur(8px);
+  }
+  h1 { font-size: 20px; margin: 0 0 10px; }
+  p { margin: 0 0 14px; font-size: 14px; line-height: 1.7; opacity: .92; }
+  ul { margin: 0 0 18px; padding-left: 20px; font-size: 13.5px; line-height: 1.9; opacity: .9; }
+  .ok { color: #86efac; }
+  .bad { color: #fca5a5; }
+  code { background: rgba(0,0,0,.25); padding: 1px 6px; border-radius: 5px; font-size: 12.5px; }
+  a.btn {
+    display: inline-block; margin-top: 6px;
+    background: #fff; color: #1d4ed8;
+    padding: 10px 18px; border-radius: 10px;
+    font-weight: 700; text-decoration: none; font-size: 14px;
+  }
+  a.btn:hover { filter: brightness(.95); }
+  .log { margin-top: 16px; font-size: 12.5px; line-height: 1.8; font-family: ui-monospace, Consolas, monospace; opacity: .9; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>🔧 正在清理旧版缓存</h1>
+  <p>这个页面不依赖任何外部脚本，所以即使旧版本被缓存也能正常打开。它会注销 Service Worker、删除所有缓存，然后跳转到最新版。</p>
+  <ul id="steps">
+    <li id="s1">注销 Service Worker …</li>
+    <li id="s2">删除缓存空间 …</li>
+    <li id="s3">跳转到最新版 …</li>
+  </ul>
+  <p id="result"></p>
+  <a class="btn" id="go" href="./index.html?fresh=1" hidden>手动进入最新版 →</a>
+  <div class="log" id="log"></div>
+</div>
+
+<script>
+(function () {
+  const logEl = document.getElementById('log');
+  const result = document.getElementById('result');
+  const go = document.getElementById('go');
+  const log = (msg) => { logEl.textContent += msg + '\n'; };
+  const mark = (id, ok, text) => {
+    const li = document.getElementById(id);
+    if (li) li.innerHTML = (ok ? '<span class="ok">✔</span> ' : '<span class="bad">✖</span> ') + text;
+  };
+
+  async function run() {
+    let okAll = true;
+
+    // 1. 注销 Service Worker
+    try {
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        log('发现 Service Worker 注册数：' + regs.length);
+        await Promise.all(regs.map((r) => r.unregister()));
+        mark('s1', true, 'Service Worker 已注销（' + regs.length + ' 个）');
+      } else {
+        mark('s1', true, '本浏览器不支持 Service Worker，跳过');
+      }
+    } catch (e) {
+      okAll = false;
+      mark('s1', false, '注销失败：' + e.message);
+    }
+
+    // 2. 清空缓存
+    try {
+      if (typeof caches !== 'undefined') {
+        const keys = await caches.keys();
+        log('缓存空间：' + (keys.length ? keys.join(', ') : '（空）'));
+        await Promise.all(keys.map((k) => caches.delete(k)));
+        mark('s2', true, '已删除 ' + keys.length + ' 个缓存空间');
+      } else {
+        mark('s2', true, '本浏览器不支持 Cache Storage，跳过');
+      }
+    } catch (e) {
+      okAll = false;
+      mark('s2', false, '清缓存失败：' + e.message);
+    }
+
+    // 3. 跳转（带时间戳，确保命中网络而不是缓存）
+    mark('s3', true, '正在跳转到最新版 …');
+    result.textContent = okAll
+      ? '清理完成，页面会自动跳转。若停在这里，点下面的按钮。'
+      : '部分清理失败，请点下面按钮进入，或手动清除浏览器缓存。';
+    go.hidden = false;
+
+    setTimeout(() => {
+      location.replace('./index.html?fresh=' + Date.now());
+    }, 900);
+  }
+
+  run();
+})();
+</script>
+</body>
+</html>

@@ -12,6 +12,10 @@
 
   const $ = (id) => document.getElementById(id);
 
+  /** 构建号：与 version.json 对比，用于发现「浏览器还在跑旧版」 */
+  const BUILD = '3.1.1';
+
+
   const GROUPS = {
     direct: '直达',
     leg1: '第一程',
@@ -43,7 +47,7 @@
    * ------------------------------------------------------------------ */
   const el = {};
   function cacheElements() {
-    const ids = [      'engineBadge', 'themeBtn', 'printBtn',
+    const ids = [      'engineBadge', 'themeBtn', 'printBtn', 'hardResetBtn', 'versionTag',
       'dropzone', 'fileInput', 'pasteArea', 'parseTextBtn',
       'csvImportBtn', 'csvExportBtn', 'csvFileInput',
       'ocrStatus', 'rowsBody', 'emptyHint', 'addRowBtn', 'demoBtn', 'clearBtn',
@@ -129,6 +133,60 @@
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 版本自检与强制更新
+   *
+   * 背景：GitHub Pages 给静态文件打 max-age=600，Service Worker 又会缓存整套
+   * 资源，容易出现「代码已更新、浏览器还在跑旧版」。这里做两件事：
+   *   1. 启动时比对 version.json，不一致就清缓存重载（每会话最多一次，防循环）
+   *   2. 头部 ⟳ 按钮：手动一键清缓存并更新
+   * ------------------------------------------------------------------ */
+  async function hardReset(reason) {
+    try {
+      if (navigator.serviceWorker) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map((r) => r.unregister()));
+      }
+      if (typeof caches !== 'undefined') {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+      }
+    } catch {
+      /* 尽力而为，失败也继续跳转 */
+    }
+    const base = location.pathname.replace(/[^/]*$/, '');
+    const url =
+      base +
+      'index.html?fresh=' +
+      Date.now() +
+      (reason ? '&reason=' + encodeURIComponent(reason) : '');
+    location.replace(url);
+  }
+
+  async function checkVersion() {
+    try {
+      const res = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+      if (!res.ok) return null;
+      const remote = await res.json();
+      if (!remote || !remote.version) return null;
+
+      if (remote.version !== BUILD) {
+        const key = 'kunle.versionReload';
+        if (sessionStorage.getItem(key) === remote.version) return remote;
+        sessionStorage.setItem(key, remote.version);
+        setStatus(
+          `检测到新版本 v${remote.version}（当前 v${BUILD}），正在清理缓存并自动更新…`,
+          'loading'
+        );
+        await hardReset('auto');
+        return remote;
+      }
+      return remote;
+    } catch {
+      return null;
+    }
   }
 
   /* ------------------------------------------------------------------ *
@@ -1109,9 +1167,13 @@
       renderHistory();
     });
 
-    /* --- 主题 / 打印 --- */
+    /* --- 主题 / 打印 / 强制更新 --- */
     el.themeBtn.addEventListener('click', cycleTheme);
     el.printBtn.addEventListener('click', doPrint);
+    el.hardResetBtn.addEventListener('click', () => {
+      setStatus('正在清除缓存并更新到最新版…', 'loading');
+      hardReset('manual');
+    });
 
     /* --- 报告导出 --- */
     el.exportMdBtn.addEventListener('click', () => exportReport('md'));
@@ -1186,6 +1248,8 @@
       .register('sw.js', { updateViaCache: 'none' })
       .then((reg) => {
         reg.update().catch(() => {});
+        // 长时间开着的页面也定期检查更新
+        setInterval(() => reg.update().catch(() => {}), 60 * 1000);
       })
       .catch(() => {
         /* 离线缓存失败不影响主流程 */
@@ -1212,6 +1276,10 @@
     registerServiceWorker();
 
     el.buildInfo.textContent = `最后更新：${new Date(document.lastModified).toLocaleString('zh-CN')}`;
+    if (el.versionTag) el.versionTag.textContent = `v${BUILD}`;
+
+    // 与服务器上的 version.json 比对，发现浏览器还在跑旧版就自动清缓存更新
+    checkVersion();
 
     const params = new URLSearchParams(location.search);
     if (params.get('demo') === '1') {

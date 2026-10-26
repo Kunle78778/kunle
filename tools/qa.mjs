@@ -351,9 +351,31 @@ async function main() {
   `);
   check(
     'Service Worker 已升级且改为网络优先',
-    /kunle-v4/.test(sw) && /networkFirst|NETWORK_FIRST/.test(sw),
+    /kunle-v5/.test(sw) && /networkFirst|NETWORK_FIRST/.test(sw),
     sw.match(/kunle-v\d+/)?.[0] || '未找到版本号'
   );
+
+  /* ---- 版本自检：页面构建号必须与 version.json 一致 ---- */
+  const ver = await cdp.eval(`
+    const tag = document.getElementById('versionTag');
+    const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+    const j = await r.json();
+    return { page: (tag ? tag.textContent : '').replace(/^v/, ''), remote: j.version };
+  `);
+  check('页面版本与 version.json 一致', Boolean(ver.page) && ver.page === ver.remote,
+    `页面 v${ver.page} / 线上 v${ver.remote}`);
+
+  /* ---- 一键清缓存页可用 ---- */
+  const reset = await cdp.eval(`
+    const r = await fetch('reset.html', { cache: 'no-store' });
+    const t = await r.text();
+    return { ok: r.ok, unregister: t.includes('getRegistrations'), clear: t.includes('caches.delete') };
+  `);
+  check('reset.html 可访问且会注销 SW / 清缓存', reset.ok && reset.unregister && reset.clear);
+
+  /* ---- 头部强制更新按钮 ---- */
+  const hasResetBtn = await cdp.eval(`return !!document.getElementById('hardResetBtn')`);
+  check('头部提供「清除缓存并更新」按钮', Boolean(hasResetBtn));
 
   /* ---- 收尾 ---- */
   ws.close();  chrome.kill();

@@ -7,7 +7,7 @@
 <meta name="description" content="粘贴 12306 车票截图，本地 OCR 识别后计算最省钱、最省时的购票方案，支持两次中转、性价比前沿、散点图与历史记录。" />
 <meta name="theme-color" content="#2563eb" />
 <link rel="manifest" href="manifest.json" />
-<link rel="stylesheet" href="assets/styles.css" />
+<link rel="stylesheet" href="assets/styles.css?v=3.1.1" />
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚄</text></svg>" />
 </head>
 <body>
@@ -25,6 +25,7 @@
       <span id="engineBadge" class="badge badge-muted">引擎：检测中</span>
       <button id="themeBtn" class="btn btn-ghost btn-icon" type="button" title="切换主题">🌓</button>
       <button id="printBtn" class="btn btn-ghost btn-icon" type="button" title="打印方案单">🖨</button>
+      <button id="hardResetBtn" class="btn btn-ghost btn-icon" type="button" title="清除缓存并更新到最新版">⟳</button>
     </div>
   </div>
 </header>
@@ -272,17 +273,17 @@ G3 北京南 上海虹桥 07:00 11:41 04时41分 二等座 有 ¥667.0"></textar
 
 <footer class="site-footer wrap">
   <span>车票最优助手 · 本地 OCR + 本地计算</span>
-  <span id="buildInfo" class="muted"></span>
+  <span class="muted"><span id="versionTag">v-</span> ｜ <span id="buildInfo"></span></span>
 </footer>
 
-<script src="assets/parse.js"></script>
-<script src="assets/algo.js"></script>
-<script src="assets/store.js"></script>
-<script src="assets/chart.js"></script>
-<script src="assets/timeline.js"></script>
-<script src="assets/validate.js"></script>
-<script src="assets/report.js"></script>
-<script src="assets/a11y.js"></script>
-<script src="assets/app.js"></script>
+<script src="assets/parse.js?v=3.1.1"></script>
+<script src="assets/algo.js?v=3.1.1"></script>
+<script src="assets/store.js?v=3.1.1"></script>
+<script src="assets/chart.js?v=3.1.1"></script>
+<script src="assets/timeline.js?v=3.1.1"></script>
+<script src="assets/validate.js?v=3.1.1"></script>
+<script src="assets/report.js?v=3.1.1"></script>
+<script src="assets/a11y.js?v=3.1.1"></script>
+<script src="assets/app.js?v=3.1.1"></script>
 </body>
 </html>

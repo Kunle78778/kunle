@@ -11,7 +11,7 @@
  *   - 每次发版提升 VERSION，激活时清掉所有旧缓存
  */
 
-const VERSION = 'kunle-v4';
+const VERSION = 'kunle-v5';
 const CACHE = `static-${VERSION}`;
 
 const PRECACHE = [
@@ -30,6 +30,7 @@ const PRECACHE = [
   './assets/a11y.js',
   './assets/icon.svg',
 ];
+// 注意：reset.html 故意不预缓存，保证它永远拿到最新版本
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

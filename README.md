@@ -287,9 +287,23 @@ npm run qa        # 端到端冒烟测试：需要先启动本地服务
 
 - HTML / JS / CSS 一律**网络优先**，离线才回退缓存；
 - 每次发版提升 `sw.js` 里的 `VERSION`，激活时删除全部旧缓存；
-- 页面检测到元素缺失时会顶部提示并提供「强制刷新」按钮。
+- 页面启动时比对 `version.json`，发现浏览器还在跑旧版就自动清缓存更新；
+- 头部提供 **⟳ 清除缓存并更新** 按钮；
+- 静态资源带 `?v=版本号`，绕过 `max-age=600` 的 HTTP 缓存。
 
-手动清理：浏览器开发者工具 → Application → Service Workers → Unregister，然后硬刷新（`Ctrl` + `F5`）。
+### 界面还是旧版 / 按钮没反应？
+
+打开这个地址一次即可，它不依赖任何被缓存的资源：
+
+```
+https://kunle78778.github.io/kunle/reset.html
+```
+
+它会注销 Service Worker、删除全部缓存，然后跳转到最新版。页面底部的 `vX.Y.Z` 是当前构建号，可用来确认是否已经更新。
+
+> 本地使用时同理：`http://127.0.0.1:8787/reset.html`
+
+手动清理也行：开发者工具 → Application → Service Workers → Unregister → 硬刷新（`Ctrl` + `F5`）。
 
 
 ---
