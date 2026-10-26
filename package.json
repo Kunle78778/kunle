@@ -8,7 +8,8 @@
     "start": "node server/server.mjs",
     "dev": "node server/server.mjs",
     "test": "node --test",
-    "test:watch": "node --test --watch"
+    "test:watch": "node --test --watch",
+    "qa": "node tools/qa.mjs"
   },
   "keywords": ["train", "ticket", "ocr", "optimization", "pareto", "12306"],
   "engines": {

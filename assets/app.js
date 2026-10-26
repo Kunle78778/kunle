@@ -43,8 +43,7 @@
    * ------------------------------------------------------------------ */
   const el = {};
   function cacheElements() {
-    const ids = [
-      'engineBadge', 'themeBtn', 'printBtn',
+    const ids = [      'engineBadge', 'themeBtn', 'printBtn',
       'dropzone', 'fileInput', 'pasteArea', 'parseTextBtn',
       'csvImportBtn', 'csvExportBtn', 'csvFileInput',
       'ocrStatus', 'rowsBody', 'emptyHint', 'addRowBtn', 'demoBtn', 'clearBtn',
@@ -61,6 +60,25 @@
       'printArea', 'buildInfo',
     ];
     for (const id of ids) el[id] = $(id);
+
+    // 防御：如果页面结构与脚本版本不匹配（典型场景是 Service Worker 缓存了旧页面），
+    // 这里能立刻发现并提示刷新，而不是让后面的绑定静默失败。
+    const missing = ids.filter((id) => !el[id]);
+    if (missing.length) {
+      console.error('[kunle] 页面元素缺失，可能存在新旧版本缓存不一致：', missing.join(', '));
+      const bar = document.createElement('div');
+      bar.className = 'version-banner';
+      bar.innerHTML =
+        '<span>页面可能被缓存为旧版本，功能会异常。</span>' +
+        '<button type="button" class="btn btn-mini">强制刷新</button>';
+      bar.querySelector('button').addEventListener('click', () => {
+        if (navigator.serviceWorker) {
+          navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister()));
+        }
+        caches.keys().then((ks) => ks.forEach((k) => caches.delete(k))).finally(() => location.reload());
+      });
+      document.body.appendChild(bar);
+    }
   }
 
   /* ------------------------------------------------------------------ *
@@ -217,7 +235,7 @@
     el.minTransfer.value = String(s.minTransfer);
     el.maxWait.value = String(s.maxWait);
     el.hubInput.value = s.hub || '';
-    el.maxLegs.value = String(s.maxLegs || 2);
+    el.maxLegs.value = String(s.maxLegs == null ? 2 : s.maxLegs);
 
     const f = s.filters || {};
     el.fSeat.value = f.seatKeyword || '';
@@ -660,6 +678,15 @@
       seatAvailable: r.seatAvailable,
       group: r.group,
     }));
+
+    // 相同数据连续计算时不重复记一条历史
+    const signature = JSON.stringify([plainRows, state.weight, el.maxLegs.value]);
+    const last = window.KunleStore.loadHistory()[0];
+    if (last && last.signature === signature) {
+      renderHistory();
+      return;
+    }
+
     window.KunleStore.saveSnapshot({
       rows: plainRows,
       hub: el.hubInput.value,
@@ -668,6 +695,7 @@
       maxWait: Number(el.maxWait.value),
       maxLegs: Number(el.maxLegs.value),
       summary: { options: s.count, minPrice: s.minPrice, minDuration: s.minDuration },
+      signature,
     });
     renderHistory();
   }
@@ -711,6 +739,17 @@
     if (h.minTransfer != null) el.minTransfer.value = String(h.minTransfer);
     if (h.maxWait != null) el.maxWait.value = String(h.maxWait);
     if (h.maxLegs != null) el.maxLegs.value = String(h.maxLegs);
+
+    // 清掉上一轮的旧结果，避免看成是这次的数据
+    state.options = [];
+    state.filtered = [];
+    el.results.hidden = true;
+    el.recommend.hidden = true;
+    el.statsBar.hidden = true;
+    el.chartCard.hidden = true;
+    el.detailCard.hidden = true;
+    el.issuesCard.hidden = true;
+
     renderTable();
     setStatus('已回填一条历史记录，点「计算最优方案」重新计算。');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -755,7 +794,8 @@
   function buildPrintArea() {
     const s = window.KunleAlgo.stats(state.options);
     const recs = window.KunleAlgo.recommend(state.options, state.weight);
-    const top = sortedOptions(state.filtered).slice(0, 20);
+    const source = state.filtered.length ? state.filtered : state.options;
+    const top = sortedOptions(source).slice(0, 20);
 
     const recHtml = recs
       .map(
@@ -1106,7 +1146,9 @@
         if (!el.detailCard.hidden) {
           el.detailCard.hidden = true;
           if (state.a11y) state.a11y.releaseFocus();
+          return true;
         }
+        return false;
       },
     });
     state.a11y.initTabs(el.sortTabs);
@@ -1135,8 +1177,24 @@
   function registerServiceWorker() {
     if (!('serviceWorker' in navigator)) return;
     if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
-    navigator.serviceWorker.register('sw.js').catch(() => {
-      /* 离线缓存失败不影响主流程 */
+
+    navigator.serviceWorker
+      .register('sw.js', { updateViaCache: 'none' })
+      .then((reg) => {
+        // 主动检查更新，避免长期停留在旧缓存
+        reg.update().catch(() => {});
+        reg.addEventListener?.('updatefound', () => {});
+      })
+      .catch(() => {
+        /* 离线缓存失败不影响主流程 */
+      });
+
+    // 新版本接管后自动刷新一次，避免新旧脚本混用
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloaded) return;
+      reloaded = true;
+      location.reload();
     });
   }
 

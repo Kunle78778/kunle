@@ -125,6 +125,7 @@
       maxWait: snapshot.maxWait,
       maxLegs: snapshot.maxLegs,
       summary: snapshot.summary || {},
+      signature: snapshot.signature || '',
     };
     const next = [entry, ...list].slice(0, HISTORY_LIMIT);
     writeJSON(KEY_HISTORY, next);

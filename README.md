@@ -232,10 +232,11 @@ kunle/
 ## 测试
 
 ```bash
-npm test          # node --test
+npm test          # 单元测试：node --test
+npm run qa        # 端到端冒烟测试：需要先启动本地服务
 ```
 
-覆盖 132 个用例：
+### 单元测试（132 个用例）
 
 | 文件 | 覆盖内容 |
 |---|---|
@@ -246,6 +247,13 @@ npm test          # node --test
 | `tests/validate.test.mjs` | 各类错误/警告规则、跨行检查、严重度排序 |
 | `tests/report.test.mjs` | 洞察生成、Markdown/HTML 结构、转义 |
 | `tests/timeline.test.mjs` | 片段拆分、宽度分配、SVG 生成、与算法联动 |
+
+### 端到端冒烟测试（20 项）
+
+`tools/qa.mjs` 不依赖 puppeteer：它启动无头 Chrome，通过 **DevTools Protocol** 真实点击控件并断言 DOM，同时收集未捕获异常与 `console.error`。覆盖：渲染、筛选、权重排序、行程详情开关、Esc 关闭、散点图绘制、排序、历史、设置持久化、主题、CSV 往返、报告生成、数据校验、空状态、Service Worker 版本。
+
+> 这也是排查「按钮点了没反应」「弹层关不掉」这类问题的抓手：多数情况是新旧资源混用，脚本绑定了已经不存在的元素。
+
 
 ---
 
@@ -270,6 +278,19 @@ npm test          # node --test
 4. **票价需你提供**：工具不查价，价格来自你的截图或输入。
 5. **不校验真实性**：算法只做优化，不验证车次是否存在、是否已售完。
 6. **中转需分段购票**：第二程可能售罄，请以 12306 实际余票为准。
+
+### 关于 Service Worker 缓存
+
+页面注册了 Service Worker 以支持离线与安装。**升级后如果界面表现异常（按钮无反应、面板关不掉），几乎都是缓存了旧版页面。**
+
+现已改为：
+
+- HTML / JS / CSS 一律**网络优先**，离线才回退缓存；
+- 每次发版提升 `sw.js` 里的 `VERSION`，激活时删除全部旧缓存；
+- 页面检测到元素缺失时会顶部提示并提供「强制刷新」按钮。
+
+手动清理：浏览器开发者工具 → Application → Service Workers → Unregister，然后硬刷新（`Ctrl` + `F5`）。
+
 
 ---
 

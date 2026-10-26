@@ -53,7 +53,7 @@
     }
 
     function onKeydown(e) {
-      // 焦点陷阱
+      // 焦点陷阱（弹层/详情打开时锁住 Tab）
       if (trapEl && e.key === 'Tab') {
         const nodes = [...trapEl.querySelectorAll(FOCUSABLE)].filter(
           (n) => n.offsetParent !== null || n === document.activeElement
@@ -70,10 +70,14 @@
         }
         return;
       }
-      if (trapEl && e.key === 'Escape' && typeof o.onEscape === 'function') {
-        e.preventDefault();
-        o.onEscape();
-        return;
+
+      // Esc：无论有没有焦点陷阱都应该能关闭当前浮层
+      if (e.key === 'Escape' && typeof o.onEscape === 'function') {
+        const handled = o.onEscape(e);
+        if (handled !== false) {
+          e.preventDefault();
+          return;
+        }
       }
 
       const combo = normalize(e);
