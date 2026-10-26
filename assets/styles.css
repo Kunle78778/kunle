@@ -415,71 +415,6 @@ kbd {
 .filter-check { align-self: center; }
 
 /* ================================================================== *
- * 对比
- * ================================================================== */
-.item-compare {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  color: var(--muted);
-  cursor: pointer;
-  user-select: none;
-  margin-left: auto;
-}
-.item-compare input { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
-
-.compare-bar {
-  position: fixed;
-  left: 50%;
-  bottom: 18px;
-  transform: translateX(-50%);
-  z-index: 50;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 16px;
-  border-radius: 999px;
-  background: var(--card);
-  border: 1px solid var(--border);
-  box-shadow: 0 12px 32px rgba(16, 24, 40, .22);
-  font-size: 13.5px;
-}
-
-.modal {
-  position: fixed;
-  inset: 0;
-  z-index: 80;
-  background: rgba(10, 14, 22, .5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 18px;
-}
-.modal-inner {
-  width: min(1000px, 100%);
-  max-height: 86vh;
-  overflow: auto;
-  margin: 0;
-}
-.compare-table { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 560px; }
-.compare-table th, .compare-table td {
-  border: 1px solid var(--border);
-  padding: 9px 12px;
-  text-align: left;
-  vertical-align: top;
-}
-.compare-table th {
-  background: var(--bg-soft);
-  font-size: 12.5px;
-  color: var(--text-soft);
-  white-space: nowrap;
-  width: 130px;
-}
-.compare-table td.best { color: var(--ok); font-weight: 700; }
-.compare-table tr:hover td { background: rgba(37, 99, 235, .04); }
-
-/* ================================================================== *
  * 历史
  * ================================================================== */
 .history-list { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
@@ -605,8 +540,8 @@ kbd {
 
   body { background: #fff; color: #000; font-size: 12px; }
   .site-header, .input-card, .control-card, .filter-card,
-  .compare-bar, .modal, .site-footer, .disclaimer,
-  .header-actions, .chart-card, .history-card, #recommend { display: none !important; }
+  .site-footer, .disclaimer,
+  .header-actions, .chart-card, .history-card, .issues-card, .detail-card, #recommend { display: none !important; }
 
   .print-only { display: block; }
   .print-only h1 { font-size: 18px; margin: 0 0 4px; }

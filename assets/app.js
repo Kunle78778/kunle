@@ -2,7 +2,7 @@
  * app.js —— 界面控制器
  *
  * 职责：把「录入 → 解析 → 计算 → 展示」串起来，并管理
- *   设置持久化、筛选、图表、方案对比、历史记录、CSV、打印、主题
+ *   设置持久化、筛选、图表、行程详情、历史记录、CSV、打印、主题
  *
  * 计算全部在本地完成；只有截图会送到本机 Node 服务做 OCR。
  */
@@ -30,7 +30,6 @@
     rows: [],
     options: [],
     filtered: [],
-    compare: new Set(),
     sort: 'score',
     weight: 55,
     settings: null,
@@ -59,8 +58,6 @@
       'exportMdBtn', 'exportHtmlBtn', 'issuesCard', 'issuesSummary', 'issuesList',
       'detailCard', 'detailTitle', 'detailTimeline', 'detailBody', 'detailClose',
       'historyCard', 'historyList', 'historyClear',
-      'compareBar', 'compareCount', 'compareOpen', 'compareClear',
-      'compareModal', 'compareTable', 'compareClose',
       'printArea', 'buildInfo',
     ];
     for (const id of ids) el[id] = $(id);
@@ -345,7 +342,6 @@
     renderChart();
     renderList();
     renderIssues();
-    renderCompareBar();
 
     const s = window.KunleAlgo.stats(state.options);
     setStatus(
@@ -451,14 +447,12 @@
     if (!state.chart) {
       state.chart = window.KunleChart.createChart(el.chartCanvas, {
         onSelect: (option) => {
-          state.compare.add(option.key);
-          renderCompareBar();
-          el.chartHint.textContent = `已选中 ${option.code}，可在下方列表中继续勾选对比。`;
+          renderDetail(option);
+          el.chartHint.textContent = `已展开 ${option.code} 的行程详情，点击列表项也能查看。`;
         },
       });
     }
     state.chart.setData(state.filtered.length ? state.filtered : state.options);
-    state.chart.setSelected([...state.compare]);
   }
 
   /* ------------------------------------------------------------------ *
@@ -482,7 +476,6 @@
             o.transferCount === 1 ? '中转' : '两次中转'
           }${o.hub ? ' · ' + escapeHtml(o.hub) : ''}</span>`;
     const paretoPill = o.pareto ? '<span class="pareto-pill">性价比前沿</span>' : '';
-    const checked = state.compare.has(o.key) ? 'checked' : '';
 
     let legs = '';
     if (o.transferCount > 0) {
@@ -519,10 +512,6 @@
         <div class="item-head">
           <span class="train-code">${escapeHtml(o.code)}</span>
           ${typePill}${paretoPill}
-          <label class="item-compare">
-            <input type="checkbox" data-compare="${escapeHtml(o.key)}" ${checked} />
-            加入对比
-          </label>
         </div>
         <div class="timeline">
           <span class="tm">${escapeHtml(o.depart)}</span>
@@ -652,63 +641,6 @@
       download(window.KunleReport.fileName('html'), page, 'text/html;charset=utf-8');
     }
     setStatus(`已导出${format === 'md' ? ' Markdown ' : ' HTML '}报告，可在浏览器或编辑器中打开。`);
-  }
-
-  /* ------------------------------------------------------------------ *
-   * 方案对比
-   * ------------------------------------------------------------------ */
-  function selectedOptions() {
-    return state.options.filter((o) => state.compare.has(o.key));
-  }
-
-  function renderCompareBar() {
-    el.compareBar.hidden = state.compare.size === 0;
-    el.compareCount.textContent = String(state.compare.size);
-    if (state.chart) state.chart.setSelected([...state.compare]);
-  }
-
-  function renderCompareTable() {
-    const list = selectedOptions();
-    if (!list.length) {
-      el.compareTable.innerHTML = '<tr><td class="muted">还没有选中方案</td></tr>';
-      return;
-    }
-
-    const priced = list.filter((o) => o.price != null);
-    const minPrice = priced.length ? Math.min(...priced.map((o) => o.price)) : null;
-    const minDur = Math.min(...list.map((o) => o.durationMin));
-
-    const rows = [
-      {
-        label: '方案',
-        value: (o) =>
-          `<b>${escapeHtml(o.code)}</b><br><span class="muted small">${escapeHtml(routeText(o))}</span>`,
-      },
-      { label: '总价', value: (o) => money(o.price), best: (o) => o.price != null && o.price === minPrice },
-      { label: '总耗时', value: (o) => fmtDur(o.durationMin), best: (o) => o.durationMin === minDur },
-      { label: '发车 → 到达', value: (o) => `${escapeHtml(o.depart)} → ${escapeHtml(o.arrive)}` },
-      { label: '中转次数', value: (o) => (o.transferCount === 0 ? '直达' : o.transferCount + ' 次') },
-      { label: '换乘等待', value: (o) => (o.transferCount ? fmtDur(o.waitMin) : '—') },
-      { label: '性价比前沿', value: (o) => (o.pareto ? '<span class="pareto-pill">是</span>' : '否') },
-      { label: '有票', value: (o) => (o.buyable ? '是' : '否') },
-      { label: '综合分', value: (o) => o.score.toFixed(3) },
-    ];
-
-    const head =
-      '<tr><th>比较项</th>' + list.map((o, i) => `<th>方案 ${i + 1}</th>`).join('') + '</tr>';
-
-    const body = rows
-      .map(
-        (row) =>
-          `<tr><th>${row.label}</th>` +
-          list
-            .map((o) => `<td class="${row.best && row.best(o) ? 'best' : ''}">${row.value(o)}</td>`)
-            .join('') +
-          '</tr>'
-      )
-      .join('');
-
-    el.compareTable.innerHTML = head + body;
   }
 
   /* ------------------------------------------------------------------ *
@@ -914,7 +846,7 @@
     el.maxLegs.value = '3';
     renderTable();
     setOcrStatus(
-      '已载入示例：5 趟直达 + 郑州、南京两处中转车次。点「计算最优方案」查看直达 / 一次中转 / 两次中转的对比。'
+      '已载入示例：5 趟直达 + 郑州、南京两处中转车次。点「计算最优方案」查看直达 / 一次中转 / 两次中转的差异。'
     );
   }
 
@@ -965,15 +897,15 @@
       state.rows = [];
       state.options = [];
       state.filtered = [];
-      state.compare.clear();
       renderTable();
       el.results.hidden = true;
       el.recommend.hidden = true;
       el.statsBar.hidden = true;
       el.chartCard.hidden = true;
+      el.detailCard.hidden = true;
+      el.issuesCard.hidden = true;
       setStatus('');
       setOcrStatus('');
-      renderCompareBar();
     });
 
     el.demoBtn.addEventListener('click', loadDemo);
@@ -1111,40 +1043,8 @@
       setSort(btn.dataset.sort);
     });
 
-    /* --- 对比 --- */
-    el.list.addEventListener('change', (e) => {
-      const cb = e.target.closest('[data-compare]');
-      if (!cb) return;
-      const key = cb.dataset.compare;
-      if (cb.checked) state.compare.add(key);
-      else state.compare.delete(key);
-      renderCompareBar();
-    });
-
-    el.compareOpen.addEventListener('click', () => {
-      renderCompareTable();
-      el.compareModal.hidden = false;
-      if (state.a11y) state.a11y.trapFocus(el.compareModal);
-    });
-    el.compareClose.addEventListener('click', () => {
-      el.compareModal.hidden = true;
-      if (state.a11y) state.a11y.releaseFocus();
-    });
-    el.compareModal.addEventListener('click', (e) => {
-      if (e.target === el.compareModal) {
-        el.compareModal.hidden = true;
-        if (state.a11y) state.a11y.releaseFocus();
-      }
-    });
-    el.compareClear.addEventListener('click', () => {
-      state.compare.clear();
-      renderCompareBar();
-      el.list.querySelectorAll('[data-compare]').forEach((cb) => (cb.checked = false));
-    });
-
     /* --- 行程详情 --- */
     el.list.addEventListener('click', (e) => {
-      if (e.target.closest('.item-compare')) return;
       const article = e.target.closest('.item');
       if (!article) return;
       const option = state.options.find((o) => 'opt-' + o.key === article.id);
@@ -1203,8 +1103,8 @@
         'alt+d': () => loadDemo(),
       },
       onEscape: () => {
-        if (!el.compareModal.hidden) {
-          el.compareModal.hidden = true;
+        if (!el.detailCard.hidden) {
+          el.detailCard.hidden = true;
           if (state.a11y) state.a11y.releaseFocus();
         }
       },

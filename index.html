@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>车票最优助手 · 截图算最优购票方案</title>
-<meta name="description" content="粘贴 12306 车票截图，本地 OCR 识别后计算最省钱、最省时的购票方案，支持两次中转、性价比前沿、方案对比与历史记录。" />
+<meta name="description" content="粘贴 12306 车票截图，本地 OCR 识别后计算最省钱、最省时的购票方案，支持两次中转、性价比前沿、散点图与历史记录。" />
 <meta name="theme-color" content="#2563eb" />
 <link rel="manifest" href="manifest.json" />
 <link rel="stylesheet" href="assets/styles.css" />
@@ -266,26 +266,6 @@ G3 北京南 上海虹桥 07:00 11:41 04时41分 二等座 有 ¥667.0"></textar
     票价与余票请以 12306 官方页面为准。
   </p>
 </main>
-
-<!-- 对比浮动条 -->
-<div id="compareBar" class="compare-bar" hidden>
-  <span>已选 <b id="compareCount">0</b> 个方案</span>
-  <button id="compareOpen" class="btn btn-primary btn-mini" type="button">并排对比</button>
-  <button id="compareClear" class="btn btn-ghost btn-mini" type="button">清空</button>
-</div>
-
-<!-- 对比弹窗 -->
-<div id="compareModal" class="modal" hidden>
-  <div class="modal-inner card">
-    <div class="card-head">
-      <h2 class="section-title">方案对比</h2>
-      <button id="compareClose" class="btn btn-mini" type="button">关闭</button>
-    </div>
-    <div class="table-wrap">
-      <table id="compareTable" class="compare-table"></table>
-    </div>
-  </div>
-</div>
 
 <!-- 打印专用 -->
 <div id="printArea" class="print-only"></div>
