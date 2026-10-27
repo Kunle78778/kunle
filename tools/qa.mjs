@@ -420,6 +420,10 @@ async function main() {
         before,
         after: document.querySelectorAll('#rowsBody tr').length,
         status: status.slice(0, 150),
+        rawVisible: !document.getElementById('ocrRaw').hidden,
+        rawHasText: (document.getElementById('ocrRawText').textContent || '').length > 20,
+        autoComputed: !document.getElementById('results').hidden
+          && document.querySelectorAll('.item').length > 0,
       };
     `);
     check(
@@ -427,6 +431,8 @@ async function main() {
       pasteTest.after > pasteTest.before && /识别完成/.test(pasteTest.status),
       `${pasteTest.before} → ${pasteTest.after} 行 ｜ ${pasteTest.status}`
     );
+    check('识别后自动计算方案（不用再点按钮）', pasteTest.autoComputed);
+    check('可查看识别到的原始文字', pasteTest.rawVisible && pasteTest.rawHasText);
   } else {
     console.log('· 跳过粘贴测试（线上没有本机 OCR 服务）');
   }
@@ -476,7 +482,7 @@ async function main() {
   `);
   check(
     'Service Worker 已升级且改为网络优先',
-    /kunle-v6/.test(sw) && /networkFirst|NETWORK_FIRST/.test(sw),
+    /kunle-v7/.test(sw) && /networkFirst|NETWORK_FIRST/.test(sw),
     sw.match(/kunle-v\d+/)?.[0] || '未找到版本号'
   );
 

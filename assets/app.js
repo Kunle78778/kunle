@@ -13,7 +13,7 @@
   const $ = (id) => document.getElementById(id);
 
   /** 构建号：与 version.json 对比，用于发现「浏览器还在跑旧版」 */
-  const BUILD = '3.1.2';
+  const BUILD = '3.1.3';
 
 
   const GROUPS = {
@@ -50,7 +50,7 @@
     const ids = [      'engineBadge', 'themeBtn', 'printBtn', 'hardResetBtn', 'versionTag',
       'dropzone', 'fileInput', 'pasteArea', 'parseTextBtn',
       'csvImportBtn', 'csvExportBtn', 'csvFileInput',
-      'ocrStatus', 'rowsBody', 'emptyHint', 'addRowBtn', 'demoBtn', 'clearBtn',
+      'ocrStatus', 'ocrRaw', 'ocrRawText', 'copyRawBtn', 'rowsBody', 'emptyHint', 'addRowBtn', 'demoBtn', 'clearBtn',
       'hubInput', 'minTransfer', 'maxWait', 'maxLegs', 'weightInput', 'weightOut', 'computeBtn',
       'status', 'statsBar', 'stCount', 'stPrice', 'stTime', 'stSaved', 'stPareto',
       'recommend', 'recommendGrid',
@@ -344,6 +344,37 @@
     }
   }
 
+  /** 把 OCR 原始文字展示出来，识别不准时便于排查 */
+  function renderRawOcr(lines) {
+    if (!el.ocrRaw || !el.ocrRawText) return;
+    if (!lines || !lines.length) {
+      el.ocrRaw.hidden = true;
+      return;
+    }
+    const sorted = [...lines].sort((a, b) => (a.y || 0) - (b.y || 0) || (a.x || 0) - (b.x || 0));
+    el.ocrRawText.textContent = sorted.map((l) => l.text).join('\n');
+    el.ocrRaw.hidden = false;
+  }
+
+  /**
+   * 录入数据后只要数据够算，就直接算，不用再点一次按钮
+   * @param {string} prefix 提示语前半句
+   */
+  function autoComputeIfReady(prefix) {
+    const usable = state.rows.filter((r) => r.code && (r.depart || r.durationMin));
+    if (!usable.length) {
+      setOcrStatus(
+        `${prefix}，但没有一行同时具备「车次号 + 时间」，所以还算不了。` +
+          '请检查下方表格补齐车次/发车时间，或改用「粘贴文本」录入。',
+        'error'
+      );
+      return false;
+    }
+    compute();
+    setOcrStatus(`${prefix}，已自动计算方案。表格里可随时修正，改完点「计算最优方案」重算。`);
+    return true;
+  }
+
   async function ocrImage(file) {
     if (window.__KUNLE_STANDALONE__) {
       setOcrStatus(
@@ -372,18 +403,20 @@
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || '识别失败');
 
+      renderRawOcr(data.lines || []);
+
       const parsed = window.KunleParse.fromOcrLines(data.lines || []);
       if (!parsed.length) {
         setOcrStatus(
-          '没有从这张图里识别出车次。建议：截图时保留「车次 + 时间 + 票价」整行，或改用「粘贴文本」。',
+          `这张图里没解析出车次（共识别到 ${data.lines.length} 段文字）。` +
+            '可以展开下面「识别到的原始文字」看看到底读到了什么；' +
+            '也可以把那些文字复制出来，用「粘贴文本」录入。',
           'error'
         );
         return;
       }
       const n = addParsed(parsed, 'direct');
-      setOcrStatus(
-        `识别完成：从 ${data.lines.length} 段文字中解析出 ${n} 趟车次，请在表格里核对修正（OCR 可能有错字）。`
-      );
+      autoComputeIfReady(`识别完成：从 ${data.lines.length} 段文字中解析出 ${n} 趟车次`);
     } catch (err) {
       setOcrStatus(
         `识别失败：${escapeHtml(err.message || err)}<br><span class="muted small">` +
@@ -861,7 +894,7 @@
         return;
       }
       const n = addParsed(rows, 'direct');
-      setOcrStatus(`CSV 导入完成：新增 ${n} 行。`);
+      autoComputeIfReady(`CSV 导入完成：新增 ${n} 行`);
     } catch (err) {
       setOcrStatus('CSV 导入失败：' + escapeHtml(err.message || err), 'error');
     }
@@ -1137,16 +1170,27 @@
         return;
       }
       const n = addParsed(parsed, 'direct');
-      setOcrStatus(`文本解析完成：新增 ${n} 趟车次。`);
       el.pasteArea.value = '';
+      autoComputeIfReady(`文本解析完成：新增 ${n} 趟车次`);
     });
 
-    el.csvImportBtn.addEventListener('click', () => el.csvFileInput.click());
-    el.csvFileInput.addEventListener('change', () => {
+    el.csvImportBtn.addEventListener('click', () => el.csvFileInput.click());    el.csvFileInput.addEventListener('change', () => {
       if (el.csvFileInput.files && el.csvFileInput.files[0]) importCsv(el.csvFileInput.files[0]);
       el.csvFileInput.value = '';
     });
     el.csvExportBtn.addEventListener('click', exportCsv);
+
+    // 复制识别到的原始文字
+    el.copyRawBtn.addEventListener('click', async () => {
+      const text = (el.ocrRawText && el.ocrRawText.textContent) || '';
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+        setOcrStatus('已把识别到的文字复制到剪贴板，可粘贴到文本框里手动整理。');
+      } catch {
+        setOcrStatus('复制失败，请手动选中下面框里的文字复制。', 'error');
+      }
+    });
 
     /* --- 参数 --- */
     el.weightInput.addEventListener('input', () => {

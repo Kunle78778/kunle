@@ -206,3 +206,48 @@ test('blankRow 提供表格初始结构', () => {
   assert.equal(r.code, '');
   assert.equal(r.price, null);
 });
+
+/* ---------------- 竖排卡片（手机 App 版式） ---------------- */
+
+const cardLines = () => [
+  // 卡片 1
+  { text: 'G1', x: 40, y: 40, h: 40 },
+  { text: '06:30', x: 40, y: 90, h: 30 },
+  { text: '北京南', x: 180, y: 90, h: 30 },
+  { text: '11:24', x: 40, y: 140, h: 30 },
+  { text: '上海虹桥', x: 180, y: 140, h: 30 },
+  { text: '4时54分', x: 40, y: 190, h: 30 },
+  { text: '¥598', x: 300, y: 190, h: 30 },
+  // 卡片 2
+  { text: 'G3', x: 40, y: 280, h: 40 },
+  { text: '07:00', x: 40, y: 330, h: 30 },
+  { text: '北京南', x: 180, y: 330, h: 30 },
+  { text: '11:41', x: 40, y: 380, h: 30 },
+  { text: '上海虹桥', x: 180, y: 380, h: 30 },
+  { text: '4时41分', x: 40, y: 430, h: 30 },
+  { text: '¥667', x: 300, y: 430, h: 30 },
+];
+
+test('fromOcrStream 按车次号切段，适配竖排卡片', () => {
+  const rows = P.fromOcrStream(cardLines());
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].code, 'G1');
+  assert.equal(rows[0].depart, '06:30');
+  assert.equal(rows[0].arrive, '11:24');
+  assert.equal(rows[0].price, 598);
+  assert.equal(rows[0].durationMin, 294);
+  assert.equal(rows[1].code, 'G3');
+});
+
+test('fromOcrLines 对竖排卡片自动选用流式解析', () => {
+  const rows = P.fromOcrLines(cardLines());
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].code, 'G1');
+  assert.equal(rows[0].price, 598);
+});
+
+test('scoreRows 偏好字段更完整的解析结果', () => {
+  const good = [{ code: 'G1', price: 100, depart: '06:30', arrive: '11:24', durationMin: 294 }];
+  const bad = [{ code: '', price: null, depart: '06:30' }];
+  assert.ok(P.scoreRows(good) > P.scoreRows(bad));
+});

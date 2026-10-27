@@ -226,6 +226,25 @@ kbd {
 .status.is-error { border-color: #f3c7c7; background: var(--danger-bg); color: var(--danger); }
 .status.is-loading { border-color: #c9d8f8; background: rgba(37,99,235,.06); color: var(--brand-dark); }
 
+/* OCR 原始文字面板 */
+.ocr-raw { margin-top: 10px; font-size: 13px; }
+.ocr-raw summary { cursor: pointer; color: var(--text-soft); padding: 6px 2px; user-select: none; }
+.ocr-raw summary:hover { color: var(--brand); }
+.ocr-raw pre {
+  margin: 8px 0;
+  padding: 12px;
+  max-height: 240px;
+  overflow: auto;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: ui-monospace, Consolas, "Cascadia Mono", monospace;
+}
+
 .spinner {
   display: inline-block; width: 14px; height: 14px; margin-right: 8px;
   border: 2px solid rgba(37,99,235,.25); border-top-color: var(--brand);
@@ -659,6 +678,12 @@ G3 北京南 上海虹桥 07:00 11:41 04时41分 二等座 有 ¥667.0"></textar
 
     <div id="ocrStatus" class="status status-inline" hidden></div>
 
+    <details id="ocrRaw" class="ocr-raw" hidden>
+      <summary>查看识别到的原始文字（识别不准时用来排查）</summary>
+      <pre id="ocrRawText"></pre>
+      <button id="copyRawBtn" class="btn btn-mini" type="button">复制这些文字</button>
+    </details>
+
     <div class="bulk-bar">
       <span class="muted small">批量分组：</span>
       <button class="btn btn-mini" data-group="direct" type="button">直达</button>
@@ -1075,7 +1100,70 @@ G3 北京南 上海虹桥 07:00 11:41 04时41分 二等座 有 ¥667.0"></textar
   }
 
   /**
-   * OCR 结果（带包围盒）→ 按 y 聚类成行 → 每行按 x 排序 → 解析
+   * 兜底解析：不依赖「同一行」这个假设
+   *
+   * 手机 App 的车次卡片常常是竖排的：
+   *     G1
+   *     06:30  北京南
+   *     11:24  上海虹桥
+   *     4时54分
+   *     ¥598
+   * 这时按 y 聚类会切出一堆残缺行。此方法改为「按车次号切段」：
+   * 从每个车次号开始，把它之后的所有片段都喂给 extractRow，直到遇到下一个车次号。
+   *
+   * @param {{text:string,x:number,y:number}[]} lines
+   */
+  function fromOcrStream(lines) {
+    const items = (lines || [])
+      .map((l) => ({
+        text: normalize(l.text),
+        x: Number(l.x) || 0,
+        y: Number(l.y) || 0,
+      }))
+      .filter((l) => l.text);
+
+    if (!items.length) return [];
+
+    items.sort((a, b) => a.y - b.y || a.x - b.x);
+
+    const groups = [];
+    let current = null;
+
+    for (const it of items) {
+      const isTime = /^\d{1,2}:\d{2}$/.test(it.text);
+      const code = isTime ? null : fixTrainCode(it.text);
+      if (code) {
+        current = [it.text];
+        groups.push(current);
+      } else if (current) {
+        current.push(it.text);
+      }
+    }
+
+    return groups.map((g) => extractRow(g)).filter(Boolean);
+  }
+
+  /** 给解析结果打分，用来在两种解析策略里挑更靠谱的那份 */
+  function scoreRows(rows) {
+    return (rows || []).reduce(
+      (s, r) =>
+        s +
+        (r.code ? 2 : 0) +
+        (r.price != null ? 2 : 0) +
+        (r.depart ? 1 : 0) +
+        (r.arrive ? 1 : 0) +
+        (r.durationMin != null ? 1 : 0),
+      0
+    );
+  }
+
+  /**
+   * OCR 结果（带包围盒）→ 车次行
+   *
+   * 两条策略同时跑，取更靠谱的那份：
+   *   1) 按 y 聚类成行（横排表格截图）
+   *   2) 按车次号切段（手机 App 竖排卡片截图）
+   *
    * @param {{text:string,x:number,y:number,w?:number,h?:number}[]} lines
    */
   function fromOcrLines(lines) {
@@ -1100,13 +1188,18 @@ G3 北京南 上海虹桥 07:00 11:41 04时41分 二等座 有 ¥667.0"></textar
       }
     }
 
-    const rows = [];
+    const clustered = [];
     for (const g of groups) {
       g.items.sort((a, b) => a.x - b.x);
       const row = extractRow(g.items.map((i) => i.text));
-      if (row) rows.push(row);
+      if (row) clustered.push(row);
     }
-    return rows;
+
+    const streamed = fromOcrStream(items);
+
+    if (!clustered.length) return streamed;
+    if (!streamed.length) return clustered;
+    return scoreRows(streamed) > scoreRows(clustered) ? streamed : clustered;
   }
 
   /**
@@ -1287,6 +1380,8 @@ G3 北京南 上海虹桥 07:00 11:41 04时41分 二等座 有 ¥667.0"></textar
     fixTrainCode,
     extractRow,
     fromOcrLines,
+    fromOcrStream,
+    scoreRows,
     fromText,
     blankRow,
     durationBetween,
@@ -3325,7 +3420,7 @@ ${recHtml}
   const $ = (id) => document.getElementById(id);
 
   /** 构建号：与 version.json 对比，用于发现「浏览器还在跑旧版」 */
-  const BUILD = '3.1.2';
+  const BUILD = '3.1.3';
 
 
   const GROUPS = {
@@ -3362,7 +3457,7 @@ ${recHtml}
     const ids = [      'engineBadge', 'themeBtn', 'printBtn', 'hardResetBtn', 'versionTag',
       'dropzone', 'fileInput', 'pasteArea', 'parseTextBtn',
       'csvImportBtn', 'csvExportBtn', 'csvFileInput',
-      'ocrStatus', 'rowsBody', 'emptyHint', 'addRowBtn', 'demoBtn', 'clearBtn',
+      'ocrStatus', 'ocrRaw', 'ocrRawText', 'copyRawBtn', 'rowsBody', 'emptyHint', 'addRowBtn', 'demoBtn', 'clearBtn',
       'hubInput', 'minTransfer', 'maxWait', 'maxLegs', 'weightInput', 'weightOut', 'computeBtn',
       'status', 'statsBar', 'stCount', 'stPrice', 'stTime', 'stSaved', 'stPareto',
       'recommend', 'recommendGrid',
@@ -3656,6 +3751,37 @@ ${recHtml}
     }
   }
 
+  /** 把 OCR 原始文字展示出来，识别不准时便于排查 */
+  function renderRawOcr(lines) {
+    if (!el.ocrRaw || !el.ocrRawText) return;
+    if (!lines || !lines.length) {
+      el.ocrRaw.hidden = true;
+      return;
+    }
+    const sorted = [...lines].sort((a, b) => (a.y || 0) - (b.y || 0) || (a.x || 0) - (b.x || 0));
+    el.ocrRawText.textContent = sorted.map((l) => l.text).join('\n');
+    el.ocrRaw.hidden = false;
+  }
+
+  /**
+   * 录入数据后只要数据够算，就直接算，不用再点一次按钮
+   * @param {string} prefix 提示语前半句
+   */
+  function autoComputeIfReady(prefix) {
+    const usable = state.rows.filter((r) => r.code && (r.depart || r.durationMin));
+    if (!usable.length) {
+      setOcrStatus(
+        `${prefix}，但没有一行同时具备「车次号 + 时间」，所以还算不了。` +
+          '请检查下方表格补齐车次/发车时间，或改用「粘贴文本」录入。',
+        'error'
+      );
+      return false;
+    }
+    compute();
+    setOcrStatus(`${prefix}，已自动计算方案。表格里可随时修正，改完点「计算最优方案」重算。`);
+    return true;
+  }
+
   async function ocrImage(file) {
     if (window.__KUNLE_STANDALONE__) {
       setOcrStatus(
@@ -3684,18 +3810,20 @@ ${recHtml}
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || '识别失败');
 
+      renderRawOcr(data.lines || []);
+
       const parsed = window.KunleParse.fromOcrLines(data.lines || []);
       if (!parsed.length) {
         setOcrStatus(
-          '没有从这张图里识别出车次。建议：截图时保留「车次 + 时间 + 票价」整行，或改用「粘贴文本」。',
+          `这张图里没解析出车次（共识别到 ${data.lines.length} 段文字）。` +
+            '可以展开下面「识别到的原始文字」看看到底读到了什么；' +
+            '也可以把那些文字复制出来，用「粘贴文本」录入。',
           'error'
         );
         return;
       }
       const n = addParsed(parsed, 'direct');
-      setOcrStatus(
-        `识别完成：从 ${data.lines.length} 段文字中解析出 ${n} 趟车次，请在表格里核对修正（OCR 可能有错字）。`
-      );
+      autoComputeIfReady(`识别完成：从 ${data.lines.length} 段文字中解析出 ${n} 趟车次`);
     } catch (err) {
       setOcrStatus(
         `识别失败：${escapeHtml(err.message || err)}<br><span class="muted small">` +
@@ -4173,7 +4301,7 @@ ${recHtml}
         return;
       }
       const n = addParsed(rows, 'direct');
-      setOcrStatus(`CSV 导入完成：新增 ${n} 行。`);
+      autoComputeIfReady(`CSV 导入完成：新增 ${n} 行`);
     } catch (err) {
       setOcrStatus('CSV 导入失败：' + escapeHtml(err.message || err), 'error');
     }
@@ -4449,16 +4577,27 @@ ${recHtml}
         return;
       }
       const n = addParsed(parsed, 'direct');
-      setOcrStatus(`文本解析完成：新增 ${n} 趟车次。`);
       el.pasteArea.value = '';
+      autoComputeIfReady(`文本解析完成：新增 ${n} 趟车次`);
     });
 
-    el.csvImportBtn.addEventListener('click', () => el.csvFileInput.click());
-    el.csvFileInput.addEventListener('change', () => {
+    el.csvImportBtn.addEventListener('click', () => el.csvFileInput.click());    el.csvFileInput.addEventListener('change', () => {
       if (el.csvFileInput.files && el.csvFileInput.files[0]) importCsv(el.csvFileInput.files[0]);
       el.csvFileInput.value = '';
     });
     el.csvExportBtn.addEventListener('click', exportCsv);
+
+    // 复制识别到的原始文字
+    el.copyRawBtn.addEventListener('click', async () => {
+      const text = (el.ocrRawText && el.ocrRawText.textContent) || '';
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+        setOcrStatus('已把识别到的文字复制到剪贴板，可粘贴到文本框里手动整理。');
+      } catch {
+        setOcrStatus('复制失败，请手动选中下面框里的文字复制。', 'error');
+      }
+    });
 
     /* --- 参数 --- */
     el.weightInput.addEventListener('input', () => {

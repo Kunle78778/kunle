@@ -199,7 +199,70 @@
   }
 
   /**
-   * OCR 结果（带包围盒）→ 按 y 聚类成行 → 每行按 x 排序 → 解析
+   * 兜底解析：不依赖「同一行」这个假设
+   *
+   * 手机 App 的车次卡片常常是竖排的：
+   *     G1
+   *     06:30  北京南
+   *     11:24  上海虹桥
+   *     4时54分
+   *     ¥598
+   * 这时按 y 聚类会切出一堆残缺行。此方法改为「按车次号切段」：
+   * 从每个车次号开始，把它之后的所有片段都喂给 extractRow，直到遇到下一个车次号。
+   *
+   * @param {{text:string,x:number,y:number}[]} lines
+   */
+  function fromOcrStream(lines) {
+    const items = (lines || [])
+      .map((l) => ({
+        text: normalize(l.text),
+        x: Number(l.x) || 0,
+        y: Number(l.y) || 0,
+      }))
+      .filter((l) => l.text);
+
+    if (!items.length) return [];
+
+    items.sort((a, b) => a.y - b.y || a.x - b.x);
+
+    const groups = [];
+    let current = null;
+
+    for (const it of items) {
+      const isTime = /^\d{1,2}:\d{2}$/.test(it.text);
+      const code = isTime ? null : fixTrainCode(it.text);
+      if (code) {
+        current = [it.text];
+        groups.push(current);
+      } else if (current) {
+        current.push(it.text);
+      }
+    }
+
+    return groups.map((g) => extractRow(g)).filter(Boolean);
+  }
+
+  /** 给解析结果打分，用来在两种解析策略里挑更靠谱的那份 */
+  function scoreRows(rows) {
+    return (rows || []).reduce(
+      (s, r) =>
+        s +
+        (r.code ? 2 : 0) +
+        (r.price != null ? 2 : 0) +
+        (r.depart ? 1 : 0) +
+        (r.arrive ? 1 : 0) +
+        (r.durationMin != null ? 1 : 0),
+      0
+    );
+  }
+
+  /**
+   * OCR 结果（带包围盒）→ 车次行
+   *
+   * 两条策略同时跑，取更靠谱的那份：
+   *   1) 按 y 聚类成行（横排表格截图）
+   *   2) 按车次号切段（手机 App 竖排卡片截图）
+   *
    * @param {{text:string,x:number,y:number,w?:number,h?:number}[]} lines
    */
   function fromOcrLines(lines) {
@@ -224,13 +287,18 @@
       }
     }
 
-    const rows = [];
+    const clustered = [];
     for (const g of groups) {
       g.items.sort((a, b) => a.x - b.x);
       const row = extractRow(g.items.map((i) => i.text));
-      if (row) rows.push(row);
+      if (row) clustered.push(row);
     }
-    return rows;
+
+    const streamed = fromOcrStream(items);
+
+    if (!clustered.length) return streamed;
+    if (!streamed.length) return clustered;
+    return scoreRows(streamed) > scoreRows(clustered) ? streamed : clustered;
   }
 
   /**
@@ -411,6 +479,8 @@
     fixTrainCode,
     extractRow,
     fromOcrLines,
+    fromOcrStream,
+    scoreRows,
     fromText,
     blankRow,
     durationBetween,
