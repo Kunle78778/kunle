@@ -22,6 +22,8 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const DRY = process.argv.includes('--dry-run');
+const msgArg = process.argv.find((a) => a.startsWith('--message='));
+const CUSTOM_MSG = msgArg ? msgArg.slice('--message='.length) : '';
 
 const API = 'https://api.github.com';
 
@@ -90,7 +92,7 @@ async function main() {
 
   // 2. 本地 HEAD 与父提交（远端 main）
   const headSha = gitText(['rev-parse', 'HEAD']);
-  const headMsg = gitText(['log', '-1', '--pretty=%B']).replace(/\s+$/, '');
+  const headMsg = CUSTOM_MSG || gitText(['log', '-1', '--pretty=%B']).replace(/\s+$/, '');
 
   const ref = await api('GET', `/repos/${owner}/${repo}/git/ref/heads/main`);
   const remoteSha = ref.object.sha;
@@ -100,40 +102,47 @@ async function main() {
     return;
   }
 
-  // 本地可能有多个未推送的提交：统一以「远端 main」为父提交，一次性推上去
+  // 以「远端 main」为父提交；远端提交对象本地不一定存在，
+  // 所以文件差异靠「两边 tree 对比」算，而不是 git diff。
   const parentSha = remoteSha;
   const parentCommit = await api('GET', `/repos/${owner}/${repo}/git/commits/${parentSha}`);
   const baseTree = parentCommit.tree.sha;
 
-  const localOnly = gitText(['rev-list', '--count', `${parentSha}..${headSha}`]);
-  if (Number(localOnly) > 1) {
-    console.log(`本地领先远端 ${localOnly} 个提交，将合并为一次 API 提交（内容完全一致）`);
+  const remoteTree = await api('GET', `/repos/${owner}/${repo}/git/trees/${baseTree}?recursive=1`);
+  const remoteBlobs = new Map();
+  for (const item of remoteTree.tree || []) {
+    if (item.type === 'blob') remoteBlobs.set(item.path, item.sha);
   }
 
-  // 3. 相对远端 main 改了哪些文件
-  const status = gitText(['diff', '--name-status', parentSha, headSha])
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => {
-      const parts = line.split('\t');
-      return { status: parts[0][0], file: parts[parts.length - 1] };
-    });
+  const localBlobs = new Map();
+  for (const line of gitText(['ls-tree', '-r', headSha]).split('\n')) {
+    if (!line.trim()) continue;
+    // 形如：100644 blob 0123abc...\tpath/to/file
+    const m2 = /^\d+\s+blob\s+([0-9a-f]+)\t(.+)$/.exec(line);
+    if (m2) localBlobs.set(m2[2], m2[1]);
+  }
+
+  const upserts = [];
+  for (const [file, sha] of localBlobs) {
+    if (remoteBlobs.get(file) !== sha) upserts.push(file);
+  }
+  const deletes = [...remoteBlobs.keys()].filter((p) => !localBlobs.has(p));
 
   console.log(`仓库：${owner}/${repo}`);
   console.log(`父提交：${parentSha.slice(0, 7)}  本地：${headSha.slice(0, 7)}`);
-  console.log(`改动文件：${status.length} 个`);
+  console.log(`需要更新 ${upserts.length} 个文件，删除 ${deletes.length} 个`);
 
   // 4. 逐个创建 blob
   const treeEntries = [];
-  for (const item of status) {
-    if (item.status === 'D') {
-      treeEntries.push({ path: item.file.replace(/\\/g, '/'), mode: '100644', type: 'blob', sha: null });
-      console.log(`  删除 ${item.file}`);
-      continue;
-    }
-    const buf = git(['show', `${headSha}:${item.file}`]);
+  for (const file of deletes) {
+    treeEntries.push({ path: file, mode: '100644', type: 'blob', sha: null });
+    console.log(`  删除 ${file}`);
+  }
+
+  for (const file of upserts) {
+    const buf = git(['show', `${headSha}:${file}`]);
     if (DRY) {
-      console.log(`  [dry] 更新 ${item.file}（${buf.length} 字节）`);
+      console.log(`  [dry] 更新 ${file}（${buf.length} 字节）`);
       continue;
     }
     const blob = await api('POST', `/repos/${owner}/${repo}/git/blobs`, {
@@ -141,12 +150,12 @@ async function main() {
       encoding: 'base64',
     });
     treeEntries.push({
-      path: item.file.replace(/\\/g, '/'),
+      path: file,
       mode: '100644',
       type: 'blob',
       sha: blob.sha,
     });
-    console.log(`  ${item.status === 'A' ? '新增' : '更新'} ${item.file}（${buf.length} 字节）`);
+    console.log(`  ${remoteBlobs.has(file) ? '更新' : '新增'} ${file}（${buf.length} 字节）`);
   }
 
   if (DRY) {
@@ -177,11 +186,20 @@ async function main() {
     force: false,
   });
 
-  // 6. 让本地也认为已同步
+  // 6. 本地引用同步：API 创建的提交对象本地没有，能拿到就更新，拿不到就提示
   try {
-    git(['update-ref', 'refs/remotes/origin/main', commit.sha]);
+    execFileSync('git', ['cat-file', '-e', `${commit.sha}^{commit}`], {
+      cwd: ROOT,
+      stdio: 'ignore',
+    });
+    execFileSync('git', ['update-ref', 'refs/remotes/origin/main', commit.sha], { cwd: ROOT });
+    console.log('本地 origin/main 已同步');
   } catch {
-    /* 忽略 */
+    console.log(
+      '提示：本地没有该提交对象（API 生成），因此 origin/main 未能更新。\n' +
+        '      内容与远端完全一致；等 git 协议恢复后执行一次：\n' +
+        '        git fetch origin && git reset --hard origin/main'
+    );
   }
 
   console.log(`\n已通过 API 推送：${commit.sha.slice(0, 7)}  ${commit.html_url || ''}`);
