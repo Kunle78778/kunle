@@ -232,14 +232,22 @@
       const isTime = /^\d{1,2}:\d{2}$/.test(it.text);
       const code = isTime ? null : fixTrainCode(it.text);
       if (code) {
-        current = [it.text];
+        current = { tokens: [it.text], y: it.y };
         groups.push(current);
       } else if (current) {
-        current.push(it.text);
+        current.tokens.push(it.text);
       }
     }
 
-    return groups.map((g) => extractRow(g)).filter(Boolean);
+    const rows = [];
+    for (const g of groups) {
+      const row = extractRow(g.tokens);
+      if (row) {
+        row.y = Math.round(g.y);
+        rows.push(row);
+      }
+    }
+    return rows;
   }
 
   /** 给解析结果打分，用来在两种解析策略里挑更靠谱的那份 */
@@ -291,7 +299,14 @@
     for (const g of groups) {
       g.items.sort((a, b) => a.x - b.x);
       const row = extractRow(g.items.map((i) => i.text));
-      if (row) clustered.push(row);
+      if (row) {
+        row.y = Math.round(g.y); // 保留纵向位置，供「车次补识」按行对齐
+        clustered.push(row);
+      }
+    }
+
+    for (const r of clustered) {
+      if (r.code) r.missingCode = false;
     }
 
     const streamed = fromOcrStream(items);

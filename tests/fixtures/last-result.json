@@ -1,0 +1,272 @@
+{
+  "at": "2026-10-29T09:59:08.871Z",
+  "rate": 100,
+  "passFiles": 4,
+  "rowsOut": [
+    {
+      "file": "table.png",
+      "rows": [
+        {
+          "code": "G1",
+          "depart": "06:30",
+          "arrive": "11:24",
+          "durationMin": 294,
+          "price": 598,
+          "fromStation": "北京南",
+          "toStation": "上海虹桥",
+          "seat": {
+            "name": "二等座",
+            "text": "有",
+            "available": true
+          },
+          "tokens": [
+            "06:30",
+            "北京南",
+            "04时54分",
+            "11:24",
+            "上海虹桥",
+            "二等座有",
+            "¥598.0"
+          ],
+          "missingCode": true,
+          "y": 18
+        },
+        {
+          "code": "G3",
+          "depart": "07:00",
+          "arrive": "11:41",
+          "durationMin": 281,
+          "price": 667,
+          "fromStation": "北京南",
+          "toStation": "上海虹桥",
+          "seat": {
+            "name": "二等座",
+            "text": "有",
+            "available": true
+          },
+          "tokens": [
+            "G3",
+            "07:00",
+            "北京南",
+            "04时41分",
+            "11:41",
+            "上海虹桥",
+            "二等座有",
+            "¥667.0"
+          ],
+          "y": 131,
+          "missingCode": false
+        },
+        {
+          "code": "D709",
+          "depart": "19:46",
+          "arrive": "07:45",
+          "durationMin": 719,
+          "price": 296,
+          "fromStation": "北京南",
+          "toStation": "上海虹桥",
+          "seat": {
+            "name": "二等座",
+            "text": "有",
+            "available": true
+          },
+          "tokens": [
+            "D709",
+            "19:46",
+            "北京南",
+            "11时59分",
+            "07:45",
+            "上海虹桥",
+            "二等座有",
+            "¥296.0"
+          ],
+          "y": 244,
+          "missingCode": false
+        }
+      ]
+    },
+    {
+      "file": "lowres.png",
+      "rows": [
+        {
+          "code": "G1",
+          "depart": "06:30",
+          "arrive": null,
+          "durationMin": 294,
+          "price": null,
+          "fromStation": "北京南",
+          "toStation": "",
+          "seat": null,
+          "tokens": [
+            "GI",
+            "06:30",
+            "北京南",
+            "04时54分"
+          ],
+          "y": 26,
+          "missingCode": false
+        },
+        {
+          "code": "G3",
+          "depart": "07:00",
+          "arrive": null,
+          "durationMin": 281,
+          "price": null,
+          "fromStation": "北京南",
+          "toStation": "",
+          "seat": null,
+          "tokens": [
+            "G3",
+            "07:00",
+            "北京南",
+            "04时41分"
+          ],
+          "y": 182,
+          "missingCode": false
+        },
+        {
+          "code": "D709",
+          "depart": "19:46",
+          "arrive": null,
+          "durationMin": 719,
+          "price": null,
+          "fromStation": "北京南",
+          "toStation": "",
+          "seat": null,
+          "tokens": [
+            "D709",
+            "19:46",
+            "北京南",
+            "11时59分",
+            "07:"
+          ],
+          "y": 338,
+          "missingCode": false
+        }
+      ]
+    },
+    {
+      "file": "dark.png",
+      "rows": [
+        {
+          "code": "G1",
+          "depart": "06:30",
+          "arrive": "11:24",
+          "durationMin": 294,
+          "price": 598,
+          "fromStation": "北京南",
+          "toStation": "上海虹桥",
+          "seat": {
+            "name": "二等座",
+            "text": "有",
+            "available": true
+          },
+          "tokens": [
+            "06:30",
+            "北京南",
+            "04时54分",
+            "11:24",
+            "上海虹桥",
+            "二等座有",
+            "¥598.0"
+          ],
+          "missingCode": true,
+          "y": 92
+        },
+        {
+          "code": "G3",
+          "depart": "07:00",
+          "arrive": "11:41",
+          "durationMin": 281,
+          "price": 667,
+          "fromStation": "北京南",
+          "toStation": "上海虹桥",
+          "seat": {
+            "name": "二等座",
+            "text": "有",
+            "available": true
+          },
+          "tokens": [
+            "G3",
+            "07:00",
+            "北京南",
+            "04时41分",
+            "11:41",
+            "上海虹桥",
+            "二等座有",
+            "¥667.0"
+          ],
+          "y": 203,
+          "missingCode": false
+        },
+        {
+          "code": "D709",
+          "depart": "19:46",
+          "arrive": "07:45",
+          "durationMin": 719,
+          "price": 296,
+          "fromStation": "北京南",
+          "toStation": "上海虹桥",
+          "seat": {
+            "name": "二等座",
+            "text": "有",
+            "available": true
+          },
+          "tokens": [
+            "D709",
+            "19:46",
+            "北京南",
+            "11时59分",
+            "07:45",
+            "上海虹桥",
+            "二等座有",
+            "¥296.0"
+          ],
+          "y": 314,
+          "missingCode": false
+        }
+      ]
+    },
+    {
+      "file": "card.png",
+      "rows": [
+        {
+          "code": "G1",
+          "depart": null,
+          "arrive": null,
+          "durationMin": 294,
+          "price": 598,
+          "fromStation": "",
+          "toStation": "",
+          "seat": null,
+          "tokens": [
+            "GI",
+            "06:30北京南",
+            "11:24上海虹桥",
+            "04时54分",
+            "¥598.0"
+          ],
+          "y": 121
+        },
+        {
+          "code": "G3",
+          "depart": null,
+          "arrive": null,
+          "durationMin": 281,
+          "price": 667,
+          "fromStation": "",
+          "toStation": "",
+          "seat": null,
+          "tokens": [
+            "G3",
+            "07:00北京南",
+            "11:41上海虹桥",
+            "04时41分",
+            "¥667.0"
+          ],
+          "y": 592
+        }
+      ]
+    }
+  ]
+}

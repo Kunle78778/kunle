@@ -13,7 +13,7 @@
   const $ = (id) => document.getElementById(id);
 
   /** 构建号：与 version.json 对比，用于发现「浏览器还在跑旧版」 */
-  const BUILD = '3.1.3';
+  const BUILD = '3.1.4';
 
 
   const GROUPS = {
@@ -375,6 +375,85 @@
     return true;
   }
 
+  /**
+   * 用「左列条」的识别结果补齐缺失的车次号。
+   * 服务端单独把左侧窄条放大后识别（整图偶尔漏掉某个车次），
+   * 这里按纵向比例把车次对齐到对应行。
+   */
+  function applyCodeHints(rows, data) {
+    const P = window.KunleParse;
+    const strip = data.stripVariant;
+    if (!strip || !Array.isArray(strip.lines) || !strip.lines.length) return 0;
+
+    const stripH = Number(strip.height) || 0;
+    const mainH = Number(data.height) || 0;
+    if (!stripH || !mainH) return 0;
+
+    const hints = [];
+    for (const line of strip.lines) {
+      const code = P.fixTrainCode(P.normalize(line.text || ''));
+      if (!code) continue;
+      const ratio = ((Number(line.y) || 0) + (Number(line.h) || 0) / 2) / stripH;
+      hints.push({ code, y: ratio * mainH, used: false });
+    }
+    if (!hints.length) return 0;
+
+    const tolerance = Math.max(24, mainH * 0.08);
+    let filled = 0;
+
+    for (const row of rows) {
+      if (row.code) continue;
+      let best = null;
+      let bestD = Infinity;
+      for (const h of hints) {
+        if (h.used) continue;
+        const d = Math.abs(h.y - (row.y || 0));
+        if (d < bestD) {
+          bestD = d;
+          best = h;
+        }
+      }
+      if (best && bestD <= tolerance) {
+        row.code = best.code;
+        row.missingCode = false;
+        row.codeFromStrip = true;
+        best.used = true;
+        filled++;
+      }
+    }
+    return filled;
+  }
+
+  /**
+   * 服务端会返回多个预处理变体（原图 / 增强对比），
+   * 每个变体各解析一遍，取「字段最完整」的那份结果。
+   */
+  function pickBestParse(data) {
+    const P = window.KunleParse;
+    const sources = [];
+    if (Array.isArray(data.variants) && data.variants.length) {
+      for (const v of data.variants) sources.push({ tag: v.tag || 'A', lines: v.lines || [] });
+    } else {
+      sources.push({ tag: data.variant || 'A', lines: data.lines || [] });
+    }
+
+    let best = null;
+    let bestScore = -1;
+    for (const s of sources) {
+      const rows = P.fromOcrLines(s.lines);
+      const score = P.scoreRows(rows) + rows.length * 0.5;
+      if (score > bestScore) {
+        bestScore = score;
+        best = { rows, tag: s.tag, lines: s.lines, variantCount: sources.length };
+      }
+    }
+    const fallback = { rows: [], tag: '', lines: [], variantCount: sources.length };
+    const result = best || fallback;
+    const filled = applyCodeHints(result.rows, data);
+    result.filledCodes = filled;
+    return result;
+  }
+
   async function ocrImage(file) {
     if (window.__KUNLE_STANDALONE__) {
       setOcrStatus(
@@ -403,12 +482,13 @@
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || '识别失败');
 
-      renderRawOcr(data.lines || []);
+      const best = pickBestParse(data);
+      renderRawOcr(best.lines);
 
-      const parsed = window.KunleParse.fromOcrLines(data.lines || []);
+      const parsed = best.rows;
       if (!parsed.length) {
         setOcrStatus(
-          `这张图里没解析出车次（共识别到 ${data.lines.length} 段文字）。` +
+          `这张图里没解析出车次（共识别到 ${best.lines.length} 段文字）。` +
             '可以展开下面「识别到的原始文字」看看到底读到了什么；' +
             '也可以把那些文字复制出来，用「粘贴文本」录入。',
           'error'
@@ -416,7 +496,11 @@
         return;
       }
       const n = addParsed(parsed, 'direct');
-      autoComputeIfReady(`识别完成：从 ${data.lines.length} 段文字中解析出 ${n} 趟车次`);
+      autoComputeIfReady(
+        `识别完成：从 ${best.lines.length} 段文字中解析出 ${n} 趟车次（变体 ${best.tag}` +
+          (best.filledCodes ? `，左列补识 ${best.filledCodes} 个车次号` : '') +
+          '）'
+      );
     } catch (err) {
       setOcrStatus(
         `识别失败：${escapeHtml(err.message || err)}<br><span class="muted small">` +

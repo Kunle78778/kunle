@@ -482,7 +482,7 @@ async function main() {
   `);
   check(
     'Service Worker 已升级且改为网络优先',
-    /kunle-v7/.test(sw) && /networkFirst|NETWORK_FIRST/.test(sw),
+    /kunle-v8/.test(sw) && /networkFirst|NETWORK_FIRST/.test(sw),
     sw.match(/kunle-v\d+/)?.[0] || '未找到版本号'
   );
 
